@@ -24,7 +24,8 @@ jobs:
       - name: Checkout rayforce (source)
         uses: actions/checkout@v4
         with:
-          repository: singaraiona/rayforce
+          repository: RayforceDB/rayforce
+          ref: master
           path: rayforce-src
 
       - name: Setup Emscripten

@@ -9,7 +9,7 @@
 # ============================================================================
 
 RAYFORCE_GITHUB = https://github.com/RayforceDB/rayforce.git
-RAYFORCE_LOCAL = ../rayforce
+RAYFORCE_LOCAL ?= ../rayforce
 EXEC_DIR = $(shell pwd)
 BUILD_DIR = $(EXEC_DIR)/build
 DIST_DIR = $(EXEC_DIR)/dist

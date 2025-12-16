@@ -51,6 +51,9 @@ jobs:
           # Copy core C sources from rayforce/core/ to src/rayforce/
           cp rayforce-src/core/*.c src/rayforce/
           cp rayforce-src/core/*.h src/rayforce/
+          # Verify the fix is in copied files
+          echo "Checking src/rayforce/math.c for fix:"
+          grep "obj_p(\*)(obj_p, i64_t, i64_t)" src/rayforce/math.c && echo "FIX PRESENT" || echo "FIX MISSING!"
 
       - name: Build WASM
         run: |

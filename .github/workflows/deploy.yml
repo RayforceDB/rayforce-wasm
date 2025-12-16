@@ -38,10 +38,9 @@ jobs:
       - name: Sync sources
         run: |
           mkdir -p src/rayforce
-          rsync -av --exclude='.git/' --exclude='build/' --exclude='dist/' \
-            --exclude='docs/' --exclude='examples/' --exclude='scripts/' \
-            --exclude='tests/' --exclude='Makefile' \
-            rayforce-src/ src/rayforce/
+          # Copy core C sources from rayforce/core/ to src/rayforce/
+          cp rayforce-src/core/*.c src/rayforce/
+          cp rayforce-src/core/*.h src/rayforce/
 
       - name: Build WASM
         run: |

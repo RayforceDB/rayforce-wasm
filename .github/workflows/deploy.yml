@@ -21,52 +21,27 @@ jobs:
       - name: Checkout rayforce-wasm
         uses: actions/checkout@v4
 
-      - name: Checkout rayforce (source)
-        uses: actions/checkout@v4
-        with:
-          repository: RayforceDB/rayforce
-          ref: master
-          path: rayforce-src
+      - name: Clone rayforce
+        run: |
+          git clone --depth 1 https://github.com/RayforceDB/rayforce.git src/rayforce-repo
+          echo "Rayforce commit: $(cd src/rayforce-repo && git rev-parse --short HEAD)"
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 'latest'
 
-      - name: Verify Emscripten
-        run: emcc --version
-
-      - name: Verify rayforce commit
-        run: |
-          cd rayforce-src
-          echo "Commit: $(git rev-parse --short HEAD)"
-          git log --oneline -1
-          echo "=== Direct call lines in core/math.c ==="
-          grep -n "return.*(obj_p" core/math.c | head -5
-
-      - name: Sync sources
-        run: |
-          mkdir -p src/rayforce
-          cp rayforce-src/core/*.c src/rayforce/
-          cp rayforce-src/core/*.h src/rayforce/
-          # Show the actual fix lines
-          echo "=== Lines with direct call in src/rayforce/math.c ==="
-          grep -n "return.*(obj_p" src/rayforce/math.c | head -5
-
       - name: Build WASM
-        run: make wasm
+        run: RAYFORCE_SRC_DIR=src/rayforce-repo make wasm
 
       - name: Prepare deployment
         run: |
           mkdir -p _site
-          # Copy WASM build
           cp dist/rayforce.js _site/
           cp dist/rayforce.wasm _site/
-          # Copy demo page and assets
           cp examples/index.html _site/
           cp examples/favicon.ico _site/
           cp -r examples/assets _site/
-          # Fix paths for flat structure (dist is now in same folder)
           sed -i 's|../dist/rayforce.js|./rayforce.js|g' _site/index.html
 
       - name: Upload artifact
@@ -84,4 +59,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

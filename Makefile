@@ -13,8 +13,11 @@ EXEC_DIR = $(shell pwd)
 BUILD_DIR = $(EXEC_DIR)/build
 DIST_DIR = $(EXEC_DIR)/dist
 SRC_DIR = $(EXEC_DIR)/src
-RAYFORCE_SRC = $(SRC_DIR)/rayforce
 OBJ_DIR = $(BUILD_DIR)/obj
+
+# Rayforce source location: use RAYFORCE_SRC_DIR env var or default to ../rayforce
+RAYFORCE_SRC_DIR ?= ../rayforce
+RAYFORCE_SRC = $(RAYFORCE_SRC_DIR)/core
 
 # ============================================================================
 # Emscripten Toolchain
@@ -149,21 +152,13 @@ default: wasm
 # ============================================================================
 
 # Pull rayforce sources from GitHub
+# Clone rayforce repo (for CI or fresh setup)
 pull:
-	@echo "⬇️  Cloning rayforce repo from GitHub..."
-	@rm -rf $(BUILD_DIR)/rayforce-c
-	@mkdir -p $(BUILD_DIR)
-	@git clone $(RAYFORCE_GITHUB) $(BUILD_DIR)/rayforce-c
-	@mkdir -p $(RAYFORCE_SRC)
-	@cp -r $(BUILD_DIR)/rayforce-c/core/* $(RAYFORCE_SRC)/
-	@echo "✅ Sources pulled successfully"
-
-# Copy rayforce sources from local directory (usage: make sync or RAYFORCE_SRC_DIR=path make sync)
-sync:
-	@echo "🔄 Syncing from local rayforce directory..."
-	@mkdir -p $(RAYFORCE_SRC)
-	@cp -r $${RAYFORCE_SRC_DIR:-../rayforce}/core/* $(RAYFORCE_SRC)/
-	@echo "✅ Sources synced successfully"
+	@echo "⬇️  Cloning rayforce from GitHub..."
+	@rm -rf $(SRC_DIR)/rayforce-repo
+	@git clone --depth 1 $(RAYFORCE_GITHUB) $(SRC_DIR)/rayforce-repo
+	@echo "✅ Rayforce cloned to $(SRC_DIR)/rayforce-repo"
+	@echo "   Build with: RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo make wasm"
 
 # ============================================================================
 # Build Rules
@@ -222,8 +217,7 @@ wasm-debug: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 wasm-standalone: CFLAGS = $(WASM_CFLAGS)
 wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 	@mkdir -p $(BUILD_DIR)/examples
-	@cp -r $(BUILD_DIR)/rayforce-c/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || \
-		cp -r $${RAYFORCE_SRC_DIR:-../rayforce}/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || true
+	@cp -r $(RAYFORCE_SRC_DIR)/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || true
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET)-standalone.js \
 		$(ALL_OBJS) \
 		-s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" \
@@ -238,11 +232,12 @@ wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_
 # ============================================================================
 
 # Full build from GitHub
-app: pull wasm
+app: pull
+	RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo $(MAKE) wasm
 	@echo "🎉 Full build from GitHub complete!"
 
-# Full build from local sources
-dev: sync wasm
+# Build from local rayforce (default: ../rayforce)
+dev: wasm
 	@echo "🎉 Development build complete!"
 
 # ============================================================================
@@ -288,8 +283,7 @@ help:
 	@echo "RayforceDB WASM Build System"
 	@echo ""
 	@echo "Source Management:"
-	@echo "  make pull          - Clone rayforce from GitHub"
-	@echo "  make sync          - Sync from local ../rayforce directory"
+	@echo "  make pull          - Clone rayforce from GitHub to src/rayforce-repo"
 	@echo ""
 	@echo "Build Targets:"
 	@echo "  make wasm          - Build optimized WASM module (ES6)"
@@ -333,5 +327,5 @@ show-flags:
 	@echo ""
 	@echo "GIT_HASH: $(GIT_HASH)"
 
-.PHONY: default pull sync check-emcc wasm wasm-debug wasm-standalone \
+.PHONY: default pull check-emcc wasm wasm-debug wasm-standalone \
 	app dev serve test clean clean-all help show-sources show-flags

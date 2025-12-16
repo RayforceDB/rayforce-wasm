@@ -39,21 +39,19 @@ jobs:
       - name: Verify rayforce commit
         run: |
           cd rayforce-src
-          echo "Rayforce commit: $(git rev-parse HEAD)"
-          echo "Rayforce log:"
-          git log --oneline -3
-          # Verify math.c has direct call fix
-          grep -c "obj_p\(\*\)(obj_p, i64_t, i64_t)" core/math.c || echo "WARNING: math.c fix NOT found!"
+          echo "Commit: $(git rev-parse --short HEAD)"
+          git log --oneline -1
+          echo "=== Direct call lines in core/math.c ==="
+          grep -n "return.*(obj_p" core/math.c | head -5
 
       - name: Sync sources
         run: |
           mkdir -p src/rayforce
-          # Copy core C sources from rayforce/core/ to src/rayforce/
           cp rayforce-src/core/*.c src/rayforce/
           cp rayforce-src/core/*.h src/rayforce/
-          # Verify the fix is in copied files
-          echo "Checking src/rayforce/math.c for fix:"
-          grep "obj_p(\*)(obj_p, i64_t, i64_t)" src/rayforce/math.c && echo "FIX PRESENT" || echo "FIX MISSING!"
+          # Show the actual fix lines
+          echo "=== Lines with direct call in src/rayforce/math.c ==="
+          grep -n "return.*(obj_p" src/rayforce/math.c | head -5
 
       - name: Build WASM
         run: |

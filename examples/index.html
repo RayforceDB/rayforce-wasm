@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RayforceDB WASM Demo</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ==================== */
+        /* RAYFORCE THEME       */
+        /* ==================== */
+        
+        :root {
+            /* Rayforce brand colors */
+            --rf-navy: #04233b;
+            --rf-navy-light: #0a3a5c;
+            --rf-navy-dark: #021828;
+            --rf-gold: #e9a033;
+            --rf-gold-light: #f0b85a;
+            --rf-gold-dark: #c98a2a;
+            
+            /* Semantic colors */
+            --success: #4CAF50;
+            --error: #ff4444;
+            --info: #2196F3;
+        }
+        
+        /* Dark theme (default) */
+        [data-theme="dark"] {
+            --bg-primary: var(--rf-navy-dark);
+            --bg-secondary: var(--rf-navy);
+            --bg-card: var(--rf-navy-light);
+            --bg-input: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+            --border-accent: var(--rf-gold);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.85);
+            --text-muted: rgba(255, 255, 255, 0.6);
+            --accent: var(--rf-gold);
+            --accent-hover: var(--rf-gold-light);
+            --code-bg: rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Light theme */
+        [data-theme="light"] {
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-input: rgba(4, 35, 59, 0.05);
+            --border: rgba(4, 35, 59, 0.15);
+            --border-accent: var(--rf-gold);
+            --text-primary: var(--rf-navy);
+            --text-secondary: var(--rf-navy-light);
+            --text-muted: #757575;
+            --accent: var(--rf-gold);
+            --accent-hover: var(--rf-gold-dark);
+            --code-bg: rgba(4, 35, 59, 0.05);
+        }
+        
+        /* ==================== */
+        /* BASE STYLES          */
+        /* ==================== */
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        
+        /* ==================== */
+        /* HEADER               */
+        /* ==================== */
+        
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .logo {
+            height: 36px;
+            width: auto;
+        }
+        
+        /* Dark theme shows light (white) logo */
+        .logo-for-dark { display: block; }
+        .logo-for-light { display: none; }
+        
+        /* Light theme shows dark (navy) logo */
+        [data-theme="light"] .logo-for-dark { display: none; }
+        [data-theme="light"] .logo-for-light { display: block; }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .theme-toggle {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .theme-toggle:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        
+        .theme-toggle svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        .icon-sun { display: none; }
+        .icon-moon { display: block; }
+        
+        [data-theme="light"] .icon-sun { display: block; }
+        [data-theme="light"] .icon-moon { display: none; }
+        
+        .github-link {
+            color: var(--text-muted);
+            transition: color 0.2s;
+        }
+        
+        .github-link:hover {
+            color: var(--accent);
+        }
+        
+        .github-link svg {
+            width: 24px;
+            height: 24px;
+        }
+        
+        /* ==================== */
+        /* MAIN CONTENT         */
+        /* ==================== */
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .hero {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .hero h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        
+        .hero h1 span {
+            color: var(--accent);
+        }
+        
+        .hero p {
+            color: var(--text-muted);
+            font-size: 1.125rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            border-radius: 50px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .status.loading {
+            background: rgba(33, 150, 243, 0.15);
+            border: 1px solid var(--info);
+            color: var(--info);
+        }
+        
+        .status.ready {
+            background: rgba(76, 175, 80, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        
+        .status.error {
+            background: rgba(255, 68, 68, 0.15);
+            border: 1px solid #ff4444;
+            color: #ff4444;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* ==================== */
+        /* REPL TERMINAL        */
+        /* ==================== */
+        
+        .repl {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+        
+        .repl-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: var(--code-bg);
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .dot.red { background: #ff5f56; }
+        .dot.yellow { background: #ffbd2e; }
+        .dot.green { background: #27c93f; }
+        
+        .repl-title {
+            flex: 1;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        
+        .output {
+            height: 320px;
+            overflow-y: auto;
+            padding: 1rem;
+            font-size: 0.9rem;
+            background: var(--code-bg);
+        }
+        
+        .output-line {
+            margin-bottom: 0.35rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .output-line.input {
+            color: var(--accent);
+        }
+        
+        .output-line.input::before {
+            content: '❯ ';
+            color: var(--success);
+        }
+        
+        .output-line.result {
+            color: var(--text-secondary);
+            padding-left: 1.5rem;
+        }
+        
+        .output-line.error {
+            color: #ff4444;
+            padding-left: 1.5rem;
+            font-weight: 500;
+        }
+        
+        .output-line.system {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        
+        /* ANSI color classes */
+        .ansi-bold { font-weight: bold; }
+        .ansi-red { color: #ff4444; }
+        .ansi-green { color: #4CAF50; }
+        .ansi-yellow { color: var(--rf-gold); }
+        .ansi-blue { color: #2196F3; }
+        .ansi-magenta { color: #9C27B0; }
+        .ansi-cyan { color: #00BCD4; }
+        .ansi-white { color: #ffffff; }
+        .ansi-bright-red { color: #ff6666; }
+        .ansi-bright-green { color: #66BB6A; }
+        .ansi-bright-yellow { color: var(--rf-gold-light); }
+        .ansi-bright-blue { color: #42A5F5; }
+        .ansi-bright-magenta { color: #AB47BC; }
+        .ansi-bright-cyan { color: #26C6DA; }
+        
+        .input-container {
+            display: flex;
+            align-items: center;
+            border-top: 1px solid var(--border);
+            background: var(--bg-input);
+        }
+        
+        .prompt {
+            padding: 0 0.75rem;
+            color: var(--success);
+            font-weight: bold;
+        }
+        
+        #input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            padding: 1rem 0;
+            outline: none;
+        }
+        
+        #input::placeholder {
+            color: var(--text-muted);
+        }
+        
+        /* ==================== */
+        /* EXAMPLES SECTION     */
+        /* ==================== */
+        
+        .examples {
+            margin-top: 2.5rem;
+        }
+        
+        .examples h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .example-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+        
+        .example-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.875rem 1rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+        
+        .example-btn:hover {
+            border-color: var(--accent);
+            background: rgba(233, 160, 51, 0.08);
+            transform: translateY(-2px);
+        }
+        
+        .example-btn code {
+            display: block;
+            color: var(--accent);
+            margin-top: 0.25rem;
+            font-size: 0.85rem;
+        }
+        
+        .example-btn .desc {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            display: block;
+        }
+        
+        /* ==================== */
+        /* FOOTER               */
+        /* ==================== */
+        
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            border-top: 1px solid var(--border);
+            margin-top: 3rem;
+        }
+        
+        .footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        /* ==================== */
+        /* RESPONSIVE           */
+        /* ==================== */
+        
+        @media screen and (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+            
+            .logo {
+                height: 28px;
+            }
+            
+            .container {
+                padding: 1rem;
+            }
+            
+            .hero h1 {
+                font-size: 1.75rem;
+            }
+            
+            .example-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <img src="assets/logo_light_full.svg" alt="RayforceDB" class="logo logo-for-dark">
+            <img src="assets/logo_dark_full.svg" alt="RayforceDB" class="logo logo-for-light">
+        </div>
+        <div class="header-right">
+            <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+                <svg class="icon-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                </svg>
+                <svg class="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                </svg>
+            </button>
+            <a href="https://github.com/RayforceDB/rayforce" class="github-link" target="_blank" title="GitHub">
+                <svg fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                </svg>
+            </a>
+        </div>
+    </header>
+    
+    <div class="container">
+        <section class="hero">
+            <h1>WASM <span>Playground</span></h1>
+            <p>High-performance columnar database — running entirely in your browser</p>
+            <div id="status" class="status loading">
+                <span class="status-dot"></span>
+                <span>Loading WASM module...</span>
+            </div>
+        </section>
+        
+        <div class="repl">
+            <div class="repl-header">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span class="repl-title">RayforceDB REPL — Rayfall Language</span>
+            </div>
+            <div id="output" class="output">
+                <div class="output-line system">Initializing RayforceDB WASM...</div>
+            </div>
+            <div class="input-container">
+                <span class="prompt">❯</span>
+                <input type="text" id="input" placeholder="Enter Rayfall expression (LISP syntax)..." disabled>
+            </div>
+        </div>
+        
+        <section class="examples">
+            <h2>Try these examples</h2>
+            <div class="example-grid">
+                <button class="example-btn" data-expr="(+ 1 2 3)">
+                    Basic Math
+                    <code>(+ 1 2 3)</code>
+                    <span class="desc">Add numbers</span>
+                </button>
+                <button class="example-btn" data-expr="(til 10)">
+                    Range
+                    <code>(til 10)</code>
+                    <span class="desc">Generate 0..9</span>
+                </button>
+                <button class="example-btn" data-expr="[2 3 5 7 11]">
+                    Vector
+                    <code>[2 3 5 7 11]</code>
+                    <span class="desc">Create a vector</span>
+                </button>
+                <button class="example-btn" data-expr="(sum (til 100))">
+                    Sum
+                    <code>(sum (til 100))</code>
+                    <span class="desc">Sum 0..99 = 4950</span>
+                </button>
+                <button class="example-btn" data-expr="(avg [10 20 30 40 50])">
+                    Average
+                    <code>(avg [10 20 30 40 50])</code>
+                    <span class="desc">Calculate mean</span>
+                </button>
+                <button class="example-btn" data-expr="(* [1 2 3] [4 5 6])">
+                    Vector Ops
+                    <code>(* [1 2 3] [4 5 6])</code>
+                    <span class="desc">Element-wise multiply</span>
+                </button>
+                <button class="example-btn" data-expr="(reverse [1 2 3])">
+                    Reverse
+                    <code>(reverse [1 2 3])</code>
+                    <span class="desc">Reverse a vector</span>
+                </button>
+                <button class="example-btn" data-expr="(distinct [1 2 1 3 2 3])">
+                    Distinct
+                    <code>(distinct [1 2 1 3 2 3])</code>
+                    <span class="desc">Unique values</span>
+                </button>
+                <button class="example-btn" data-expr="(group [1 2 1 3 2 1])">
+                    Group
+                    <code>(group [1 2 1 3 2 1])</code>
+                    <span class="desc">Group by value</span>
+                </button>
+                <button class="example-btn" data-expr="(dev [1 2 3 4 5])">
+                    Statistics
+                    <code>(dev [1 2 3 4 5])</code>
+                    <span class="desc">Standard deviation</span>
+                </button>
+                <button class="example-btn" data-expr="(min [5 2 8 1 9])">
+                    Min/Max
+                    <code>(min [5 2 8 1 9])</code>
+                    <span class="desc">Find minimum</span>
+                </button>
+                <button class="example-btn" data-expr="(concat [1 2] [3 4])">
+                    Concat
+                    <code>(concat [1 2] [3 4])</code>
+                    <span class="desc">Join vectors</span>
+                </button>
+            </div>
+        </section>
+    </div>
+    
+    <footer class="footer">
+        <p>
+            <a href="https://rayforcedb.com">RayforceDB</a> • 
+            <a href="https://github.com/RayforceDB/rayforce">GitHub</a> • 
+            <a href="https://rayforcedb.com/docs/">Documentation</a>
+        </p>
+    </footer>
+
+    <script type="module">
+        const output = document.getElementById('output');
+        const input = document.getElementById('input');
+        const status = document.getElementById('status');
+        const themeToggle = document.getElementById('themeToggle');
+        
+        let rayforce = null;
+        let evalStr = null;
+        let objFmt = null;
+        let dropObj = null;
+        
+        // Theme toggle
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('rf-theme', theme);
+        }
+        
+        themeToggle.addEventListener('click', () => {
+            const current = document.documentElement.getAttribute('data-theme');
+            setTheme(current === 'dark' ? 'light' : 'dark');
+        });
+        
+        // Load saved theme
+        const savedTheme = localStorage.getItem('rf-theme');
+        if (savedTheme) {
+            setTheme(savedTheme);
+        }
+        
+        // ANSI escape sequence to HTML converter
+        function ansiToHtml(str) {
+            const ansiMap = {
+                '0': '',
+                '1': 'ansi-bold',
+                '30': '',
+                '31': 'ansi-red',
+                '32': 'ansi-green',
+                '33': 'ansi-yellow',
+                '34': 'ansi-blue',
+                '35': 'ansi-magenta',
+                '36': 'ansi-cyan',
+                '37': 'ansi-white',
+                '90': 'ansi-bright-red',
+                '91': 'ansi-bright-red',
+                '92': 'ansi-bright-green',
+                '93': 'ansi-bright-yellow',
+                '94': 'ansi-bright-blue',
+                '95': 'ansi-bright-magenta',
+                '96': 'ansi-bright-cyan',
+                '38;5;9': 'ansi-bright-red',
+                '38;5;11': 'ansi-bright-yellow',
+                '38;5;14': 'ansi-bright-cyan',
+            };
+            
+            let result = '';
+            let currentClasses = [];
+            let i = 0;
+            
+            while (i < str.length) {
+                if (str[i] === '\x1b' && str[i+1] === '[') {
+                    let j = i + 2;
+                    while (j < str.length && !/[A-Za-z]/.test(str[j])) {
+                        j++;
+                    }
+                    
+                    if (str[j] === 'm') {
+                        const codes = str.slice(i + 2, j).split(';');
+                        
+                        for (const code of codes) {
+                            if (code === '0' || code === '') {
+                                if (currentClasses.length > 0) {
+                                    result += '</span>';
+                                    currentClasses = [];
+                                }
+                            } else {
+                                const fullCode = codes.join(';');
+                                const cssClass = ansiMap[fullCode] || ansiMap[code];
+                                
+                                if (cssClass && !currentClasses.includes(cssClass)) {
+                                    if (currentClasses.length > 0) {
+                                        result += '</span>';
+                                    }
+                                    currentClasses = [cssClass];
+                                    result += `<span class="${cssClass}">`;
+                                }
+                            }
+                        }
+                        i = j + 1;
+                        continue;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                
+                if (str[i] === '<') result += '&lt;';
+                else if (str[i] === '>') result += '&gt;';
+                else if (str[i] === '&') result += '&amp;';
+                else result += str[i];
+                
+                i++;
+            }
+            
+            if (currentClasses.length > 0) {
+                result += '</span>';
+            }
+            
+            return result;
+        }
+        
+        function log(message, type = 'system') {
+            const line = document.createElement('div');
+            line.className = `output-line ${type}`;
+            line.innerHTML = ansiToHtml(message);
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function setStatus(state, message) {
+            status.className = `status ${state}`;
+            status.innerHTML = `<span class="status-dot"></span><span>${message}</span>`;
+        }
+        
+        async function initRayforce() {
+            try {
+                const modulePath = '../dist/rayforce.js';
+                const createRayforce = (await import(modulePath)).default;
+                
+                log('Loading WASM binary...');
+                rayforce = await createRayforce();
+                
+                evalStr = rayforce.cwrap('eval_str', 'number', ['string']);
+                objFmt = rayforce.cwrap('strof_obj', 'string', ['number']);
+                dropObj = rayforce.cwrap('drop_obj', null, ['number']);
+                
+                setStatus('ready', 'RayforceDB ready');
+                log('RayforceDB initialized!', 'system');
+                log(`Version: ${rayforce.ccall('version_str', 'string', [], [])}`, 'system');
+                log('Type expressions using Rayfall LISP syntax: (function arg1 arg2 ...)', 'system');
+                
+                input.disabled = false;
+                input.focus();
+                
+            } catch (err) {
+                setStatus('error', 'Failed to load');
+                log(`Error: ${err.message}`, 'error');
+                log('Make sure to run: make wasm && make serve', 'system');
+            }
+        }
+        
+        function evaluate(expr) {
+            if (!rayforce) return;
+            
+            log(expr, 'input');
+            
+            try {
+                const result = evalStr(expr);
+                if (result === 0) {
+                    log('null', 'result');
+                } else {
+                    const formatted = objFmt(result);
+                    // Detect error responses from Rayforce (e.g. "[E003] error:")
+                    const isError = /\[E\d+\]\s*error/i.test(formatted);
+                    log(formatted, isError ? 'error' : 'result');
+                    dropObj(result);
+                }
+            } catch (err) {
+                log(`Error: ${err.message}`, 'error');
+            }
+        }
+        
+        // Handle input
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && input.value.trim()) {
+                evaluate(input.value.trim());
+                input.value = '';
+            }
+        });
+        
+        // Handle example buttons
+        document.querySelectorAll('.example-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const expr = btn.dataset.expr;
+                if (expr && rayforce) {
+                    evaluate(expr);
+                }
+            });
+        });
+        
+        // Initialize
+        initRayforce();
+    </script>
+</body>
+</html>

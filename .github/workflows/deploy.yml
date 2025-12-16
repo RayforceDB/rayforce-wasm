@@ -25,6 +25,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/RayforceDB/rayforce.git src/rayforce-repo
           echo "Rayforce commit: $(cd src/rayforce-repo && git rev-parse --short HEAD)"
+          echo "=== Verifying math.c direct call fix ==="
+          grep -c "return.*(obj_p" src/rayforce-repo/core/math.c
+          grep -n "obj_p(\*)" src/rayforce-repo/core/math.c | head -8
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -32,7 +35,10 @@ jobs:
           version: '3.1.5'
 
       - name: Build WASM
-        run: RAYFORCE_SRC_DIR=src/rayforce-repo make wasm
+        run: |
+          echo "Emscripten version: $(emcc --version | head -1)"
+          RAYFORCE_SRC_DIR=src/rayforce-repo make wasm
+          echo "WASM size: $(ls -la dist/rayforce.wasm | awk '{print $5}')"
 
       - name: Prepare deployment
         run: |

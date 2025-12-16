@@ -54,10 +54,7 @@ jobs:
           grep -n "return.*(obj_p" src/rayforce/math.c | head -5
 
       - name: Build WASM
-        run: |
-          # Set RAYFORCE_LOCAL to the checked out source
-          export RAYFORCE_LOCAL=$GITHUB_WORKSPACE/rayforce-src
-          make wasm
+        run: make wasm
 
       - name: Prepare deployment
         run: |

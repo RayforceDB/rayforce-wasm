@@ -9,7 +9,6 @@
 # ============================================================================
 
 RAYFORCE_GITHUB = https://github.com/RayforceDB/rayforce.git
-RAYFORCE_LOCAL ?= ../rayforce
 EXEC_DIR = $(shell pwd)
 BUILD_DIR = $(EXEC_DIR)/build
 DIST_DIR = $(EXEC_DIR)/dist
@@ -159,11 +158,11 @@ pull:
 	@cp -r $(BUILD_DIR)/rayforce-c/core/* $(RAYFORCE_SRC)/
 	@echo "✅ Sources pulled successfully"
 
-# Copy rayforce sources from local directory
+# Copy rayforce sources from local directory (usage: make sync or RAYFORCE_SRC_DIR=path make sync)
 sync:
 	@echo "🔄 Syncing from local rayforce directory..."
 	@mkdir -p $(RAYFORCE_SRC)
-	@cp -r $(RAYFORCE_LOCAL)/core/* $(RAYFORCE_SRC)/
+	@cp -r $${RAYFORCE_SRC_DIR:-../rayforce}/core/* $(RAYFORCE_SRC)/
 	@echo "✅ Sources synced successfully"
 
 # ============================================================================
@@ -224,7 +223,7 @@ wasm-standalone: CFLAGS = $(WASM_CFLAGS)
 wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 	@mkdir -p $(BUILD_DIR)/examples
 	@cp -r $(BUILD_DIR)/rayforce-c/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || \
-		cp -r $(RAYFORCE_LOCAL)/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || true
+		cp -r $${RAYFORCE_SRC_DIR:-../rayforce}/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || true
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET)-standalone.js \
 		$(ALL_OBJS) \
 		-s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" \

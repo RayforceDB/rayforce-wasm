@@ -35,6 +35,15 @@ jobs:
       - name: Verify Emscripten
         run: emcc --version
 
+      - name: Verify rayforce commit
+        run: |
+          cd rayforce-src
+          echo "Rayforce commit: $(git rev-parse HEAD)"
+          echo "Rayforce log:"
+          git log --oneline -3
+          # Verify math.c has direct call fix
+          grep -c "obj_p\(\*\)(obj_p, i64_t, i64_t)" core/math.c || echo "WARNING: math.c fix NOT found!"
+
       - name: Sync sources
         run: |
           mkdir -p src/rayforce

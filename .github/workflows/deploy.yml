@@ -29,7 +29,7 @@ jobs:
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 'latest'
+          version: '3.1.5'
 
       - name: Build WASM
         run: RAYFORCE_SRC_DIR=src/rayforce-repo make wasm

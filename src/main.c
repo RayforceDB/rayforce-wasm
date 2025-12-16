@@ -5,16 +5,18 @@
  *   for the WebAssembly build of RayforceDB.
  */
 
-#include "rayforce/eval.h"
-#include "rayforce/format.h"
-#include "rayforce/runtime.h"
-#include "rayforce/string.h"
-#include "rayforce/sys.h"
-#include "rayforce/util.h"
+// System headers (string.h is already included via def.h)
 #include <dirent.h>
 #include <emscripten.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// Rayforce headers (from RAYFORCE_SRC via -I flag)
+#include "eval.h"
+#include "format.h"
+#include "runtime.h"
+#include "sys.h"
+#include "util.h"
 
 #define __ABOUT                                                                \
   "\

@@ -181,7 +181,7 @@ $(OBJ_DIR)/%.o: $(RAYFORCE_SRC)/%.c | $(OBJ_DIR)
 
 # Compile WASM main entry point
 $(WASM_MAIN_OBJ): $(WASM_MAIN) | $(OBJ_DIR)
-	$(CC) -include $(RAYFORCE_SRC)/def.h -I$(SRC_DIR) -c $< $(CFLAGS) -o $@
+	$(CC) -include $(RAYFORCE_SRC)/def.h -iquote $(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
 
 # Build static library
 $(BUILD_DIR)/lib$(TARGET).a: $(CORE_OBJS)

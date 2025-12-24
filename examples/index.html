@@ -727,7 +727,10 @@
                 
                 input.disabled = false;
                 input.focus();
-                
+
+                // Execute any code passed via URL (Zulip code playground)
+                executeUrlCode();
+
             } catch (err) {
                 setStatus('error', 'Failed to load');
                 log(`Error: ${err.message}`, 'error');
@@ -773,7 +776,29 @@
                 }
             });
         });
-        
+
+        // Parse URL query parameters for Zulip code playground integration
+        function getCodeFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('code');
+        }
+
+        // Execute code from URL after initialization
+        function executeUrlCode() {
+            const code = getCodeFromUrl();
+            if (code && rayforce) {
+                log('Executing code from URL...', 'system');
+                // Handle multi-line code (newlines may be encoded)
+                const lines = code.split('\n');
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed) {
+                        evaluate(trimmed);
+                    }
+                }
+            }
+        }
+
         // Initialize
         initRayforce();
     </script>

@@ -170,6 +170,44 @@ rayforce-wasm/
 └── examples/             # Usage examples
 ```
 
+## Zulip Code Playground Integration
+
+The playground supports URL query parameters for integration with [Zulip's code playgrounds](https://zulip.com/help/code-blocks#code-playgrounds) feature.
+
+### URL Format
+
+```
+https://your-playground-url/?code=<URL-encoded-expression>
+```
+
+### Setting up in Zulip
+
+1. Go to **Organization settings** → **Code playgrounds**
+2. Add a new playground:
+   - **Language**: `rayfall` (or `rayforce`, `lisp`)
+   - **Name**: `RayforceDB Playground`
+   - **URL template**: `https://rayforcedb.github.io/rayforce-wasm/?code={code}`
+
+### Example
+
+When a user writes a code block like:
+
+````markdown
+```rayfall
+(sum (til 100))
+```
+````
+
+Clicking the playground button will open the RayforceDB WASM playground and automatically execute the expression.
+
+### Multi-line Code
+
+The playground handles multi-line code by executing each line sequentially:
+
+```
+https://playground-url/?code=(def%20x%2010)%0A(sum%20(til%20x))
+```
+
 ## Performance Notes
 
 - Built with `-O3` and `-msimd128` for SIMD acceleration

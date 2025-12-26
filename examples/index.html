@@ -594,9 +594,15 @@
         const themeToggle = document.getElementById('themeToggle');
         
         let rayforce = null;
-        let evalStr = null;
+        let evalCmd = null;
         let objFmt = null;
         let dropObj = null;
+        let cmdCounter = 0;
+        
+        // Command history for arrow key navigation
+        const history = [];
+        let historyIndex = -1;
+        let savedInput = '';
         
         // Theme toggle
         function setTheme(theme) {
@@ -716,7 +722,8 @@
                 log('Loading WASM binary...');
                 rayforce = await createRayforce();
                 
-                evalStr = rayforce.cwrap('eval_str', 'number', ['string']);
+                // Use eval_cmd for proper error location tracking
+                evalCmd = rayforce.cwrap('eval_cmd', 'number', ['string', 'string']);
                 objFmt = rayforce.cwrap('strof_obj', 'string', ['number']);
                 dropObj = rayforce.cwrap('drop_obj', null, ['number']);
                 
@@ -741,10 +748,20 @@
         function evaluate(expr) {
             if (!rayforce) return;
             
+            // Add to history
+            if (expr !== history[history.length - 1]) {
+                history.push(expr);
+            }
+            historyIndex = history.length;
+            savedInput = '';
+            
             log(expr, 'input');
             
             try {
-                const result = evalStr(expr);
+                // Use eval_cmd with source name for proper error location tracking
+                cmdCounter++;
+                const sourceName = `repl:${cmdCounter}`;
+                const result = evalCmd(expr, sourceName);
                 if (result === 0) {
                     log('null', 'result');
                 } else {
@@ -759,11 +776,33 @@
             }
         }
         
-        // Handle input
+        // Handle input with history navigation
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && input.value.trim()) {
                 evaluate(input.value.trim());
                 input.value = '';
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (history.length === 0) return;
+                
+                // Save current input when starting to navigate
+                if (historyIndex === history.length) {
+                    savedInput = input.value;
+                }
+                
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    input.value = history[historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex < history.length - 1) {
+                    historyIndex++;
+                    input.value = history[historyIndex];
+                } else if (historyIndex === history.length - 1) {
+                    historyIndex = history.length;
+                    input.value = savedInput;
+                }
             }
         });
         

@@ -96,6 +96,11 @@ DEBUG_LDFLAGS = \
 # ============================================================================
 
 # Functions exported to JavaScript
+# Core functions:
+#   _eval_cmd       - Evaluate with source tracking (preferred)
+#   _eval_str       - Simple evaluation (no source tracking)
+#   _get_cmd_counter  - Get current command counter
+#   _reset_cmd_counter - Reset command counter
 EXPORTED_FUNCTIONS = [ \
 	'_main', \
 	'_version_str', \
@@ -103,6 +108,9 @@ EXPORTED_FUNCTIONS = [ \
 	'_drop_obj', \
 	'_clone_obj', \
 	'_eval_str', \
+	'_eval_cmd', \
+	'_get_cmd_counter', \
+	'_reset_cmd_counter', \
 	'_obj_fmt', \
 	'_strof_obj' \
 ]

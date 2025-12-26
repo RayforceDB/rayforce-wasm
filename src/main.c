@@ -15,6 +15,7 @@
 #include "eval.h"
 #include "format.h"
 #include "runtime.h"
+#include "string.h"
 #include "sys.h"
 #include "util.h"
 
@@ -25,6 +26,13 @@
   Started from: %s\n\
   Documentation: https://rayforcedb.com/\n\
   Github: https://github.com/RayforceDB/rayforce%s\n"
+
+// ============================================================================
+// Command history and source tracking
+// ============================================================================
+
+// Command counter for unique error location tracking
+static i64_t __CMD_COUNTER = 0;
 
 // ============================================================================
 // JavaScript callbacks
@@ -97,6 +105,55 @@ EMSCRIPTEN_KEEPALIVE str_p strof_obj(obj_p obj) {
   last_formatted = obj_fmt(obj, B8_TRUE);
   return AS_C8(last_formatted);
 }
+
+// ============================================================================
+// Source-tracking evaluation functions
+// ============================================================================
+
+// Evaluate a command with source tracking for proper error locations
+// This is the preferred method for WASM - it tracks command history
+// and provides detailed error location information.
+//
+// Parameters:
+//   cmd  - The command string to evaluate
+//   name - Optional source name (e.g., "repl", "file.ray", or NULL for auto-naming)
+//
+// Returns:
+//   The result object (caller must call drop_obj when done)
+EMSCRIPTEN_KEEPALIVE obj_p eval_cmd(lit_p cmd, lit_p name) {
+  obj_p str_obj, name_obj, result;
+  c8_t auto_name[32];
+
+  if (cmd == NULL)
+    return NULL_OBJ;
+
+  // Create string object from command
+  str_obj = string_from_str(cmd, strlen(cmd));
+
+  // Create or auto-generate source name
+  if (name != NULL && name[0] != '\0') {
+    name_obj = string_from_str(name, strlen(name));
+  } else {
+    // Auto-generate name like "cmd:1", "cmd:2", etc.
+    snprintf(auto_name, sizeof(auto_name), "cmd:%lld", ++__CMD_COUNTER);
+    name_obj = string_from_str(auto_name, strlen(auto_name));
+  }
+
+  // Evaluate with source tracking
+  result = ray_eval_str(str_obj, name_obj);
+
+  // Cleanup input objects
+  drop_obj(str_obj);
+  drop_obj(name_obj);
+
+  return result;
+}
+
+// Get current command counter (useful for debugging/tracking)
+EMSCRIPTEN_KEEPALIVE i64_t get_cmd_counter(nil_t) { return __CMD_COUNTER; }
+
+// Reset command counter (e.g., when clearing history)
+EMSCRIPTEN_KEEPALIVE nil_t reset_cmd_counter(nil_t) { __CMD_COUNTER = 0; }
 
 EMSCRIPTEN_KEEPALIVE i32_t main(i32_t argc, str_p argv[]) {
   sys_info_t info;

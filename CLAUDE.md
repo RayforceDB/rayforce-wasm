@@ -76,13 +76,31 @@ rayforce-wasm/
 The WASM module exports these C functions for JavaScript:
 
 - `_main` - Entry point
-- `_version` - Get version string
+- `_version_str` - Get version string
 - `_null` - Create null object
 - `_drop_obj` - Free object memory
 - `_clone_obj` - Clone an object
-- `_eval_str` - Evaluate a RayforceDB expression
+- `_eval_str` - Evaluate a RayforceDB expression (simple, no source tracking)
+- `_eval_cmd` - Evaluate with source tracking for proper error locations (preferred)
+- `_get_cmd_counter` - Get current command counter
+- `_reset_cmd_counter` - Reset command counter
 - `_obj_fmt` - Format object to string
 - `_strof_obj` - Convert object to string representation
+
+#### Error Location Tracking
+
+The `_eval_cmd` function provides proper error location tracking similar to the native RayforceDB REPL:
+
+```javascript
+// Preferred: Evaluate with source tracking
+const result = rayforce.ccall('eval_cmd', 'number', ['string', 'string'], [code, 'myfile.ray']);
+
+// Errors will show source location like:
+// ** [E002] error: object evaluation failed
+// ╭──[1]──┬ myfile.ray:1..1 in function: @anonymous
+// │ 1     │ (+ 1 undefined-var)
+// │       ┴         ~~~~~~~~~~~~~ undefined symbol: 'undefined-var
+```
 
 ### JavaScript Interface
 
@@ -98,13 +116,16 @@ import createRayforce from './rayforce.js';
 
 const rayforce = await createRayforce();
 
-// Use ccall/cwrap for function calls
-const result = rayforce.ccall('eval_str', 'number', ['string'], ['1+2+3']);
-const formatted = rayforce.ccall('obj_fmt', 'string', ['number'], [result]);
+// Preferred: Use eval_cmd for proper error tracking
+const result = rayforce.ccall('eval_cmd', 'number', ['string', 'string'], ['(+ 1 2 3)', 'repl']);
+const formatted = rayforce.ccall('strof_obj', 'string', ['number'], [result]);
 console.log(formatted); // 6
 
 // Clean up
 rayforce.ccall('drop_obj', null, ['number'], [result]);
+
+// Simple evaluation (no source tracking)
+const simple = rayforce.ccall('eval_str', 'number', ['string'], ['1+2+3']);
 ```
 
 ## Build Flags

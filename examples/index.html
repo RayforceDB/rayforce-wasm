@@ -1602,9 +1602,11 @@ rf.eval('(max data)')   // 99</code></pre>
         // Check URL for expression parameter
         function checkUrlExpr() {
             const params = new URLSearchParams(window.location.search);
-            const expr = params.get('expr');
+            // Support both ?expr= and ?code= parameters
+            const expr = params.get('expr') || params.get('code');
             if (expr && rf) {
-                evaluate(decodeURIComponent(expr));
+                // URL params are already decoded by URLSearchParams
+                evaluate(expr);
             }
         }
 

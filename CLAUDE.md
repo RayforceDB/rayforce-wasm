@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-rayforce-wasm provides WebAssembly bindings for RayforceDB, a high-performance database. It compiles the native RayforceDB C runtime to WebAssembly using Emscripten, enabling RayforceDB to run in web browsers and Node.js environments.
+rayforce-wasm provides WebAssembly bindings and a full JavaScript SDK for RayforceDB, a high-performance columnar database. The SDK offers zero-copy TypedArray views over native Rayforce vectors for maximum performance.
 
 ## Build Commands
 
@@ -21,7 +21,7 @@ make app
 # Development build from local ../rayforce sources
 make dev
 
-# Build optimized WASM (ES6 module)
+# Build optimized WASM with SDK (ES6 module)
 make wasm
 
 # Build standalone version with preloaded examples
@@ -47,7 +47,7 @@ make clean-all
 - **Makefile** - Main build orchestration
   - `pull` - Clones RayforceDB from GitHub to `build/rayforce-c/`
   - `sync` - Copies from local `../rayforce/` for development
-  - `wasm` - Compiles to ES6 WASM module
+  - `wasm` - Compiles to ES6 WASM module + copies SDK files
   - `wasm-standalone` - Includes preloaded example files
   - `wasm-debug` - Debug build with assertions and safe heap
 
@@ -59,7 +59,10 @@ rayforce-wasm/
 ├── CLAUDE.md             # This file
 ├── README.md             # Documentation
 ├── src/
-│   └── rayforce/         # Copied C sources from RayforceDB
+│   ├── main.c            # WASM entry point with all exports
+│   ├── rayforce.sdk.js   # ES6 SDK module
+│   ├── rayforce.umd.js   # UMD bundle for CDN
+│   └── index.js          # Main entry point
 ├── build/
 │   ├── rayforce-c/       # Cloned RayforceDB repo
 │   ├── obj/              # Compiled object files
@@ -67,66 +70,129 @@ rayforce-wasm/
 ├── dist/
 │   ├── rayforce.js       # ES6 WASM module loader
 │   ├── rayforce.wasm     # WebAssembly binary
-│   └── rayforce-debug.js # Debug version
+│   ├── rayforce.sdk.js   # SDK module
+│   ├── rayforce.umd.js   # UMD bundle
+│   └── index.js          # Entry point
 └── examples/             # Usage examples
 ```
 
-### Exported Functions
+## SDK Usage
 
-The WASM module exports these C functions for JavaScript:
-
-- `_main` - Entry point
-- `_version_str` - Get version string
-- `_null` - Create null object
-- `_drop_obj` - Free object memory
-- `_clone_obj` - Clone an object
-- `_eval_str` - Evaluate a RayforceDB expression (simple, no source tracking)
-- `_eval_cmd` - Evaluate with source tracking for proper error locations (preferred)
-- `_get_cmd_counter` - Get current command counter
-- `_reset_cmd_counter` - Reset command counter
-- `_obj_fmt` - Format object to string
-- `_strof_obj` - Convert object to string representation
-
-#### Error Location Tracking
-
-The `_eval_cmd` function provides proper error location tracking similar to the native RayforceDB REPL:
+### ES6 Module
 
 ```javascript
-// Preferred: Evaluate with source tracking
-const result = rayforce.ccall('eval_cmd', 'number', ['string', 'string'], [code, 'myfile.ray']);
+import { createRayforceSDK, Types } from './dist/rayforce.sdk.js';
 
-// Errors will show source location like:
-// ** [E002] error: object evaluation failed
-// ╭──[1]──┬ myfile.ray:1..1 in function: @anonymous
-// │ 1     │ (+ 1 undefined-var)
-// │       ┴         ~~~~~~~~~~~~~ undefined symbol: 'undefined-var
+// Initialize WASM first
+const createRayforce = (await import('./dist/rayforce.js')).default;
+const wasm = await createRayforce();
+
+// Create SDK instance
+const rf = createRayforceSDK(wasm);
+
+// Evaluate expressions
+const result = rf.eval('(+ 1 2 3)');
+console.log(result.toJS()); // 6
+
+// Zero-copy vector operations
+const vec = rf.vector(Types.I64, [1, 2, 3, 4, 5]);
+const view = vec.typedArray; // BigInt64Array - zero copy!
+view[0] = 100n; // Mutate in place
+
+// Create tables
+const table = rf.table({
+  id: [1, 2, 3],
+  name: ['Alice', 'Bob', 'Carol'],
+  score: [95.5, 87.3, 92.1]
+});
+
+console.log(table.toRows());
+// [{ id: 1, name: 'Alice', score: 95.5 }, ...]
 ```
 
-### JavaScript Interface
+### CDN/Script Tag
 
-The module is built with:
-- `MODULARIZE=1` - Factory function pattern
-- `EXPORT_ES6=1` - ES6 module syntax
-- `EXPORT_NAME="createRayforce"` - Factory function name
-- `ALLOW_MEMORY_GROWTH=1` - Dynamic memory allocation
-
-Usage:
-```javascript
-import createRayforce from './rayforce.js';
-
-const rayforce = await createRayforce();
-
-// Preferred: Use eval_cmd for proper error tracking
-const result = rayforce.ccall('eval_cmd', 'number', ['string', 'string'], ['(+ 1 2 3)', 'repl']);
-const formatted = rayforce.ccall('strof_obj', 'string', ['number'], [result]);
-console.log(formatted); // 6
-
-// Clean up
-rayforce.ccall('drop_obj', null, ['number'], [result]);
-
-// Simple evaluation (no source tracking)
-const simple = rayforce.ccall('eval_str', 'number', ['string'], ['1+2+3']);
+```html
+<script src="https://cdn.../rayforce.umd.js"></script>
+<script>
+  Rayforce.init({ wasmPath: './rayforce.js' }).then(rf => {
+    const result = rf.eval('(sum (til 100))');
+    console.log(result.toJS()); // 4950
+  });
+</script>
 ```
+
+## Type System
+
+### Type Codes (matching Python bindings)
+
+| Type | Code | TypedArray | Description |
+|------|------|------------|-------------|
+| LIST | 0 | - | Mixed-type container |
+| B8 | 1 | Int8Array | Boolean |
+| U8 | 2 | Uint8Array | Unsigned byte |
+| I16 | 3 | Int16Array | 16-bit integer |
+| I32 | 4 | Int32Array | 32-bit integer |
+| I64 | 5 | BigInt64Array | 64-bit integer |
+| SYMBOL | 6 | BigInt64Array | Interned string |
+| DATE | 7 | Int32Array | Days since 2000-01-01 |
+| TIME | 8 | Int32Array | Milliseconds since midnight |
+| TIMESTAMP | 9 | BigInt64Array | Nanoseconds since 2000-01-01 |
+| F64 | 10 | Float64Array | 64-bit float |
+| GUID | 11 | - | 128-bit UUID |
+| C8 | 12 | Uint8Array | Character/String |
+| TABLE | 98 | - | Table |
+| DICT | 99 | - | Dictionary |
+
+### Atoms vs Vectors
+
+- **Atoms (scalars)**: Have negative type codes (e.g., -5 for I64 scalar)
+- **Vectors**: Have positive type codes (e.g., 5 for I64 vector)
+
+## Exported WASM Functions
+
+### Core
+- `eval_cmd(code, sourceName)` - Evaluate with source tracking
+- `eval_str(code)` - Simple evaluation
+- `strof_obj(ptr)` - Format object to string
+- `drop_obj(ptr)` - Free object memory
+- `clone_obj(ptr)` - Clone object
+
+### Type Introspection
+- `get_obj_type(ptr)` - Get type code
+- `get_obj_len(ptr)` - Get length
+- `is_obj_atom(ptr)` - Check if scalar
+- `is_obj_vector(ptr)` - Check if vector
+- `is_obj_null(ptr)` - Check if null
+- `is_obj_error(ptr)` - Check if error
+
+### Memory Access (Zero-Copy)
+- `get_data_ptr(ptr)` - Get pointer to data array
+- `get_element_size(type)` - Get byte size of element
+- `get_data_byte_size(ptr)` - Get total data size
+
+### Constructors
+- `init_b8`, `init_u8`, `init_c8`, `init_i16`, `init_i32`, `init_i64`, `init_f64`
+- `init_date`, `init_time`, `init_timestamp`
+- `init_symbol_str`, `init_string_str`
+- `init_vector`, `init_list`, `init_dict`, `init_table`
+
+### Readers
+- `read_b8`, `read_u8`, `read_c8`, `read_i16`, `read_i32`, `read_i64`, `read_f64`
+- `read_date`, `read_time`, `read_timestamp`
+- `read_symbol_id`, `symbol_to_str`
+
+### Vector Operations
+- `vec_at_idx`, `vec_set_idx`, `vec_push`, `vec_insert`, `vec_resize`
+- `fill_i64_vec`, `fill_i32_vec`, `fill_f64_vec`
+
+### Container Operations
+- `dict_keys`, `dict_vals`, `dict_get`
+- `table_keys`, `table_vals`, `table_col`, `table_row`, `table_count`
+
+### Query Operations
+- `query_select`, `query_update`
+- `table_insert`, `table_upsert`
 
 ## Build Flags
 
@@ -149,7 +215,7 @@ const simple = rayforce.ccall('eval_str', 'number', ['string'], ['1+2+3']);
 
 1. Make changes in `../rayforce/` (main RayforceDB repo)
 2. Run `make dev` to sync and build
-3. Test with `make serve` and open browser
+3. Test with `make serve` and open browser to examples/
 4. For production: `make app` builds from fresh GitHub clone
 
 ## Platform Notes
@@ -158,4 +224,3 @@ const simple = rayforce.ccall('eval_str', 'number', ['string'], ['1+2+3']);
 - `emcc` and `emar` must be available
 - Built WASM requires CORS headers for cross-origin usage
 - Use `make serve` for local testing (handles CORS)
-

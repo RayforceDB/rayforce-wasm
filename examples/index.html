@@ -1,35 +1,38 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RayforceDB WASM Demo</title>
+    <title>RayforceDB SDK Demo</title>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <style>
         /* ==================== */
         /* RAYFORCE THEME       */
         /* ==================== */
-        
+
         :root {
-            /* Rayforce brand colors */
             --rf-navy: #04233b;
             --rf-navy-light: #0a3a5c;
             --rf-navy-dark: #021828;
             --rf-gold: #e9a033;
             --rf-gold-light: #f0b85a;
             --rf-gold-dark: #c98a2a;
-            
-            /* Semantic colors */
             --success: #4CAF50;
             --error: #ff4444;
             --info: #2196F3;
+            --font-mono: 'Fira Code', 'IBM Plex Mono', 'JetBrains Mono', 'SF Mono', monospace;
+            --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
         }
-        
-        /* Dark theme (default) */
+
         [data-theme="dark"] {
             --bg-primary: var(--rf-navy-dark);
             --bg-secondary: var(--rf-navy);
@@ -44,8 +47,7 @@
             --accent-hover: var(--rf-gold-light);
             --code-bg: rgba(0, 0, 0, 0.3);
         }
-        
-        /* Light theme */
+
         [data-theme="light"] {
             --bg-primary: #f8f9fa;
             --bg-secondary: #ffffff;
@@ -60,30 +62,34 @@
             --accent-hover: var(--rf-gold-dark);
             --code-bg: rgba(4, 35, 59, 0.05);
         }
-        
-        /* ==================== */
-        /* BASE STYLES          */
-        /* ==================== */
-        
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-        
+
         body {
-            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+            font-family: var(--font-sans);
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
             line-height: 1.6;
             transition: background-color 0.3s, color 0.3s;
         }
-        
+
+        code,
+        pre,
+        .mono {
+            font-family: var(--font-mono);
+            font-feature-settings: "liga" 1, "calt" 1;
+            /* Enable ligatures */
+        }
+
         /* ==================== */
         /* HEADER               */
         /* ==================== */
-        
+
         .header {
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
@@ -95,32 +101,51 @@
             top: 0;
             z-index: 100;
         }
-        
+
         .header-left {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        
+
         .logo {
             height: 36px;
             width: auto;
         }
-        
-        /* Dark theme shows light (white) logo */
-        .logo-for-dark { display: block; }
-        .logo-for-light { display: none; }
-        
-        /* Light theme shows dark (navy) logo */
-        [data-theme="light"] .logo-for-dark { display: none; }
-        [data-theme="light"] .logo-for-light { display: block; }
-        
+
+        .logo-for-dark {
+            display: block;
+        }
+
+        .logo-for-light {
+            display: none;
+        }
+
+        [data-theme="light"] .logo-for-dark {
+            display: none;
+        }
+
+        [data-theme="light"] .logo-for-light {
+            display: block;
+        }
+
+        .badge {
+            background: linear-gradient(135deg, var(--rf-gold), var(--rf-gold-light));
+            color: var(--rf-navy-dark);
+            padding: 0.25rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
         .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        
+
         .theme-toggle {
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -133,69 +158,82 @@
             align-items: center;
             justify-content: center;
         }
-        
+
         .theme-toggle:hover {
             border-color: var(--accent);
             color: var(--accent);
         }
-        
+
         .theme-toggle svg {
             width: 20px;
             height: 20px;
         }
-        
-        .icon-sun { display: none; }
-        .icon-moon { display: block; }
-        
-        [data-theme="light"] .icon-sun { display: block; }
-        [data-theme="light"] .icon-moon { display: none; }
-        
+
+        .icon-sun {
+            display: none;
+        }
+
+        .icon-moon {
+            display: block;
+        }
+
+        [data-theme="light"] .icon-sun {
+            display: block;
+        }
+
+        [data-theme="light"] .icon-moon {
+            display: none;
+        }
+
         .github-link {
             color: var(--text-muted);
             transition: color 0.2s;
         }
-        
+
         .github-link:hover {
             color: var(--accent);
         }
-        
+
         .github-link svg {
             width: 24px;
             height: 24px;
         }
-        
+
         /* ==================== */
         /* MAIN CONTENT         */
         /* ==================== */
-        
+
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 2rem;
         }
-        
+
         .hero {
             text-align: center;
             margin-bottom: 3rem;
         }
-        
+
         .hero h1 {
             font-size: 2.5rem;
             font-weight: 700;
             margin-bottom: 0.5rem;
             color: var(--text-primary);
         }
-        
+
         .hero h1 span {
             color: var(--accent);
         }
-        
+
         .hero p {
             color: var(--text-muted);
             font-size: 1.125rem;
             margin-bottom: 1.5rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
         }
-        
+
         .status {
             display: inline-flex;
             align-items: center;
@@ -205,25 +243,25 @@
             font-size: 0.875rem;
             font-weight: 500;
         }
-        
+
         .status.loading {
             background: rgba(33, 150, 243, 0.15);
             border: 1px solid var(--info);
             color: var(--info);
         }
-        
+
         .status.ready {
             background: rgba(76, 175, 80, 0.15);
             border: 1px solid var(--success);
             color: var(--success);
         }
-        
+
         .status.error {
             background: rgba(255, 68, 68, 0.15);
             border: 1px solid #ff4444;
             color: #ff4444;
         }
-        
+
         .status-dot {
             width: 8px;
             height: 8px;
@@ -231,16 +269,73 @@
             background: currentColor;
             animation: pulse 2s infinite;
         }
-        
+
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
         }
-        
+
+        /* ==================== */
+        /* TABS                 */
+        /* ==================== */
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .tab {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 500;
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-icon {
+            width: 16px;
+            height: 16px;
+            vertical-align: -3px;
+            margin-right: 4px;
+        }
+
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
         /* ==================== */
         /* REPL TERMINAL        */
         /* ==================== */
-        
+
         .repl {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -248,7 +343,7 @@
             overflow: hidden;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
         }
-        
+
         .repl-header {
             display: flex;
             align-items: center;
@@ -257,128 +352,292 @@
             background: var(--code-bg);
             border-bottom: 1px solid var(--border);
         }
-        
+
         .dot {
             width: 12px;
             height: 12px;
             border-radius: 50%;
         }
-        
-        .dot.red { background: #ff5f56; }
-        .dot.yellow { background: #ffbd2e; }
-        .dot.green { background: #27c93f; }
-        
+
+        .dot.red {
+            background: #ff5f56;
+        }
+
+        .dot.yellow {
+            background: #ffbd2e;
+        }
+
+        .dot.green {
+            background: #27c93f;
+        }
+
         .repl-title {
             flex: 1;
             text-align: center;
             color: var(--text-muted);
             font-size: 0.875rem;
         }
-        
+
         .output {
             height: 320px;
             overflow-y: auto;
             padding: 1rem;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             background: var(--code-bg);
+            font-family: var(--font-mono);
         }
-        
+
         .output-line {
             margin-bottom: 0.35rem;
             white-space: pre-wrap;
             word-break: break-all;
         }
-        
+
         .output-line.input {
             color: var(--accent);
         }
-        
+
         .output-line.input::before {
-            content: '❯ ';
+            content: '›';
             color: var(--success);
+            font-weight: bold;
+            margin-right: 0.5rem;
         }
-        
+
         .output-line.result {
             color: var(--text-secondary);
             padding-left: 1.5rem;
         }
-        
+
+        .output-line.result::before {
+            content: "→";
+            color: var(--success);
+            margin-right: 0.5rem;
+            font-weight: bold;
+        }
+
         .output-line.error {
             color: #ff4444;
             padding-left: 1.5rem;
             font-weight: 500;
         }
-        
+
+        .output-line.error::before {
+            content: "✕";
+            margin-right: 0.5rem;
+            font-weight: bold;
+        }
+
         .output-line.system {
             color: var(--text-muted);
             font-style: italic;
         }
-        
+
+        .output-line.system::before {
+            content: "●";
+            color: var(--accent);
+            margin-right: 0.5rem;
+        }
+
+        .output-line.info {
+            color: var(--info);
+            padding-left: 1.5rem;
+        }
+
         /* ANSI color classes */
-        .ansi-bold { font-weight: bold; }
-        .ansi-red { color: #ff4444; }
-        .ansi-green { color: #4CAF50; }
-        .ansi-yellow { color: var(--rf-gold); }
-        .ansi-blue { color: #2196F3; }
-        .ansi-magenta { color: #9C27B0; }
-        .ansi-cyan { color: #00BCD4; }
-        .ansi-white { color: #ffffff; }
-        .ansi-bright-red { color: #ff6666; }
-        .ansi-bright-green { color: #66BB6A; }
-        .ansi-bright-yellow { color: var(--rf-gold-light); }
-        .ansi-bright-blue { color: #42A5F5; }
-        .ansi-bright-magenta { color: #AB47BC; }
-        .ansi-bright-cyan { color: #26C6DA; }
-        
+        .ansi-bold {
+            font-weight: bold;
+        }
+
+        .ansi-red {
+            color: #ff4444;
+        }
+
+        .ansi-green {
+            color: #4CAF50;
+        }
+
+        .ansi-yellow {
+            color: var(--rf-gold);
+        }
+
+        .ansi-blue {
+            color: #2196F3;
+        }
+
+        .ansi-magenta {
+            color: #9C27B0;
+        }
+
+        .ansi-cyan {
+            color: #00BCD4;
+        }
+
+        .ansi-white {
+            color: #ffffff;
+        }
+
         .input-container {
             display: flex;
             align-items: center;
             border-top: 1px solid var(--border);
             background: var(--bg-input);
         }
-        
+
         .prompt {
             padding: 0 0.75rem;
             color: var(--success);
             font-weight: bold;
+            font-family: var(--font-mono);
         }
-        
+
+        .prompt-icon {
+            width: 18px;
+            height: 18px;
+            color: var(--success);
+            stroke-width: 3;
+            margin: 0 0.5rem 0 0.75rem;
+            flex-shrink: 0;
+        }
+
         #input {
             flex: 1;
             background: transparent;
             border: none;
             color: var(--text-primary);
-            font-family: inherit;
+            font-family: var(--font-mono);
             font-size: 0.9rem;
             padding: 1rem 0;
             outline: none;
         }
-        
+
         #input::placeholder {
             color: var(--text-muted);
         }
-        
+
+        /* ==================== */
+        /* SDK DEMO SECTION     */
+        /* ==================== */
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .demo-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.2s;
+        }
+
+        .demo-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .demo-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .demo-card h3 .icon {
+            width: 20px;
+            height: 20px;
+            stroke-width: 2;
+            vertical-align: -3px;
+            margin-right: 6px;
+            color: var(--accent);
+        }
+
+        .demo-card p {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .demo-card pre {
+            background: var(--code-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .demo-card code {
+            color: var(--accent);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--rf-gold), var(--rf-gold-light));
+            color: var(--rf-navy-dark);
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(233, 160, 51, 0.3);
+        }
+
+        .btn-icon {
+            width: 14px;
+            height: 14px;
+            vertical-align: -2px;
+            margin-right: 4px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         /* ==================== */
         /* EXAMPLES SECTION     */
         /* ==================== */
-        
+
         .examples {
             margin-top: 2.5rem;
         }
-        
+
         .examples h2 {
             font-size: 1.25rem;
             font-weight: 600;
             margin-bottom: 1rem;
             color: var(--text-primary);
         }
-        
+
+        .section-icon {
+            width: 20px;
+            height: 20px;
+            vertical-align: -4px;
+            margin-right: 6px;
+            color: var(--accent);
+        }
+
         .example-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 0.75rem;
         }
-        
+
         .example-btn {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -391,31 +650,78 @@
             text-align: left;
             transition: all 0.2s;
         }
-        
+
         .example-btn:hover {
             border-color: var(--accent);
             background: rgba(233, 160, 51, 0.08);
             transform: translateY(-2px);
         }
-        
+
         .example-btn code {
             display: block;
             color: var(--accent);
             margin-top: 0.25rem;
             font-size: 0.85rem;
+            font-family: var(--font-mono);
         }
-        
+
         .example-btn .desc {
             color: var(--text-muted);
             font-size: 0.75rem;
             margin-top: 0.25rem;
             display: block;
         }
-        
+
+        .example-icon {
+            width: 14px;
+            height: 14px;
+            vertical-align: -2px;
+            margin-right: 4px;
+            opacity: 0.7;
+        }
+
+        .example-btn:hover .example-icon {
+            opacity: 1;
+            color: var(--accent);
+        }
+
+        /* ==================== */
+        /* TABLE DISPLAY        */
+        /* ==================== */
+
+        .table-display {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+
+        .table-display table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+        }
+
+        .table-display th,
+        .table-display td {
+            padding: 0.5rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .table-display th {
+            background: var(--code-bg);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .table-display tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
         /* ==================== */
         /* FOOTER               */
         /* ==================== */
-        
+
         .footer {
             text-align: center;
             padding: 2rem;
@@ -424,43 +730,52 @@
             border-top: 1px solid var(--border);
             margin-top: 3rem;
         }
-        
+
         .footer a {
             color: var(--accent);
             text-decoration: none;
         }
-        
+
         .footer a:hover {
             text-decoration: underline;
         }
-        
+
         /* ==================== */
         /* RESPONSIVE           */
         /* ==================== */
-        
+
         @media screen and (max-width: 768px) {
             .header {
                 padding: 1rem;
             }
-            
+
             .logo {
                 height: 28px;
             }
-            
+
             .container {
                 padding: 1rem;
             }
-            
+
             .hero h1 {
                 font-size: 1.75rem;
             }
-            
+
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+
             .example-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
             }
         }
     </style>
 </head>
+
 <body>
     <header class="header">
         <div class="header-left">
@@ -468,216 +783,336 @@
                 <img src="assets/logo_light_full.svg" alt="RayforceDB" class="logo logo-for-dark">
                 <img src="assets/logo_dark_full.svg" alt="RayforceDB" class="logo logo-for-light">
             </a>
+            <span class="badge">SDK v0.1.0</span>
         </div>
         <div class="header-right">
             <button class="theme-toggle" id="themeToggle" title="Toggle theme">
                 <svg class="icon-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
                 <svg class="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                 </svg>
             </button>
             <a href="https://github.com/RayforceDB/rayforce" class="github-link" target="_blank" title="GitHub">
                 <svg fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    <path
+                        d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                 </svg>
             </a>
         </div>
     </header>
-    
+
     <div class="container">
         <section class="hero">
-            <h1>WASM <span>Playground</span></h1>
-            <p>High-performance columnar database — running entirely in your browser</p>
+            <h1>RayforceDB <span>SDK</span></h1>
+            <p>Full-featured JavaScript SDK with zero-copy ArrayBuffer views for high-performance data operations</p>
             <div id="status" class="status loading">
                 <span class="status-dot"></span>
                 <span>Loading WASM module...</span>
             </div>
         </section>
-        
-        <div class="repl">
-            <div class="repl-header">
-                <span class="dot red"></span>
-                <span class="dot yellow"></span>
-                <span class="dot green"></span>
-                <span class="repl-title">RayforceDB REPL — Rayfall Language</span>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="repl"><i data-lucide="terminal" class="tab-icon"></i> REPL</button>
+            <button class="tab" data-tab="sdk"><i data-lucide="code-2" class="tab-icon"></i> SDK Demos</button>
+            <button class="tab" data-tab="tables"><i data-lucide="database" class="tab-icon"></i> Tables</button>
+        </div>
+
+        <!-- REPL Tab -->
+        <div id="tab-repl" class="tab-panel active">
+            <div class="repl">
+                <div class="repl-header">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                    <span class="repl-title">RayforceDB REPL — Rayfall Language</span>
+                </div>
+                <div id="output" class="output">
+                    <div class="output-line system">Initializing RayforceDB WASM...</div>
+                </div>
+                <div class="input-container">
+                    <i data-lucide="chevron-right" class="prompt-icon"></i>
+                    <input type="text" id="input" placeholder="Enter Rayfall expression (LISP syntax)..." disabled>
+                </div>
             </div>
-            <div id="output" class="output">
-                <div class="output-line system">Initializing RayforceDB WASM...</div>
-            </div>
-            <div class="input-container">
-                <span class="prompt">❯</span>
-                <input type="text" id="input" placeholder="Enter Rayfall expression (LISP syntax)..." disabled>
+
+            <section class="examples">
+                <h2><i data-lucide="lightbulb" class="section-icon"></i> Try these examples</h2>
+                <div class="example-grid">
+                    <button class="example-btn" data-expr="(sum [1 2 3])">
+                        <i data-lucide="plus-circle" class="example-icon"></i> Math
+                        <code>(sum [1 2 3])</code>
+                        <span class="desc">Sum vector</span>
+                    </button>
+                    <button class="example-btn" data-expr="(til 10)">
+                        <i data-lucide="list-ordered" class="example-icon"></i> Range
+                        <code>(til 10)</code>
+                        <span class="desc">Generate 0..9</span>
+                    </button>
+                    <button class="example-btn" data-expr="[2 3 5 7 11]">
+                        <i data-lucide="brackets" class="example-icon"></i> Vector
+                        <code>[2 3 5 7 11]</code>
+                        <span class="desc">Create vector</span>
+                    </button>
+                    <button class="example-btn" data-expr="(sum (til 100))">
+                        <i data-lucide="sigma" class="example-icon"></i> Sum
+                        <code>(sum (til 100))</code>
+                        <span class="desc">Sum 0..99</span>
+                    </button>
+                    <button class="example-btn" data-expr="(avg [10 20 30 40 50])">
+                        <i data-lucide="trending-up" class="example-icon"></i> Average
+                        <code>(avg [10 20 30 ...])</code>
+                        <span class="desc">Calculate mean</span>
+                    </button>
+                    <button class="example-btn" data-expr="(* [1 2 3] [4 5 6])">
+                        <i data-lucide="calculator" class="example-icon"></i> Vector Ops
+                        <code>(* [1 2 3] [4 5 6])</code>
+                        <span class="desc">Element-wise</span>
+                    </button>
+                    <button class="example-btn" data-expr="(distinct [1 2 1 3 2 3])">
+                        <i data-lucide="sparkles" class="example-icon"></i> Distinct
+                        <code>(distinct [...])</code>
+                        <span class="desc">Unique values</span>
+                    </button>
+                    <button class="example-btn" data-expr="(group [1 2 1 3 2 1])">
+                        <i data-lucide="layers" class="example-icon"></i> Group
+                        <code>(group [...])</code>
+                        <span class="desc">Group by value</span>
+                    </button>
+                    <button class="example-btn" data-expr="(reverse [1 2 3 4 5])">
+                        <i data-lucide="arrow-left-right" class="example-icon"></i> Reverse
+                        <code>(reverse [...])</code>
+                        <span class="desc">Reverse order</span>
+                    </button>
+                    <button class="example-btn" data-expr="(count [1 2 3 4 5])">
+                        <i data-lucide="hash" class="example-icon"></i> Count
+                        <code>(count [...])</code>
+                        <span class="desc">Get length</span>
+                    </button>
+                    <button class="example-btn" data-expr="((fn [x] (* x x)) 5)">
+                        <i data-lucide="function-square" class="example-icon"></i> Lambda
+                        <code>(fn [x] (* x x))</code>
+                        <span class="desc">Square function</span>
+                    </button>
+                    <button class="example-btn" data-expr="(map (fn [x] (* x 2)) [1 2 3])">
+                        <i data-lucide="map" class="example-icon"></i> Map
+                        <code>(map (fn ...) [...])</code>
+                        <span class="desc">Apply to each</span>
+                    </button>
+                    <button class="example-btn" data-expr="(take (til 10) 5)">
+                        <i data-lucide="scissors" class="example-icon"></i> Take
+                        <code>(take [...] n)</code>
+                        <span class="desc">First N items</span>
+                    </button>
+                    <button class="example-btn" data-expr="(first [1 2 3 4 5])">
+                        <i data-lucide="move-up-right" class="example-icon"></i> First
+                        <code>(first [...])</code>
+                        <span class="desc">First element</span>
+                    </button>
+                    <button class="example-btn" data-expr="(asc [3 1 4 1 5 9])">
+                        <i data-lucide="arrow-up-narrow-wide" class="example-icon"></i> Sort
+                        <code>(asc [...])</code>
+                        <span class="desc">Sort ascending</span>
+                    </button>
+                </div>
+            </section>
+        </div>
+
+        <!-- SDK Demos Tab -->
+        <div id="tab-sdk" class="tab-panel">
+            <div class="demo-grid">
+                <div class="demo-card">
+                    <h3><i data-lucide="binary" class="icon"></i> Zero-Copy Vectors</h3>
+                    <p>Create vectors with direct TypedArray access - no data copying!</p>
+                    <pre><code>// Create I64 vector
+const vec = rf.vector(Types.I64, [1, 2, 3, 4, 5]);
+
+// Direct TypedArray view
+const view = vec.typedArray; // BigInt64Array
+view[0] = 100n; // Mutate in-place!</code></pre>
+                    <button class="btn" onclick="demoZeroCopy()"><i data-lucide="play" class="btn-icon"></i> Run
+                        Demo</button>
+                    <div id="demo-zerocopy-result"></div>
+                </div>
+
+                <div class="demo-card">
+                    <h3><i data-lucide="table-2" class="icon"></i> Create Tables</h3>
+                    <p>Build tables from JavaScript objects with automatic type inference.</p>
+                    <pre><code>const table = rf.table({
+  id: [1, 2, 3],
+  name: ['Alice', 'Bob', 'Carol'],
+  score: [95.5, 87.3, 92.1]
+});
+
+console.log(table.toRows());</code></pre>
+                    <button class="btn" onclick="demoTable()"><i data-lucide="play" class="btn-icon"></i> Run
+                        Demo</button>
+                    <div id="demo-table-result"></div>
+                </div>
+
+                <div class="demo-card">
+                    <h3><i data-lucide="search-code" class="icon"></i> Query Builder</h3>
+                    <p>Build and execute queries with a fluent API.</p>
+                    <pre><code>const result = table
+  .select('name', 'score')
+  .where(rf.col('score').gt(90))
+  .execute();</code></pre>
+                    <button class="btn" onclick="demoQuery()"><i data-lucide="play" class="btn-icon"></i> Run
+                        Demo</button>
+                    <div id="demo-query-result"></div>
+                </div>
+
+                <div class="demo-card">
+                    <h3><i data-lucide="zap" class="icon"></i> Performance Test</h3>
+                    <p>Benchmark vector operations with 1 million elements.</p>
+                    <pre><code>// Create 1M element vector
+const big = rf.vector(Types.F64, 1000000);
+const view = big.typedArray;
+
+// Fill via TypedArray (fast!)
+for (let i = 0; i < view.length; i++) {
+  view[i] = Math.random();
+}</code></pre>
+                    <button class="btn" onclick="demoPerfTest()"><i data-lucide="gauge" class="btn-icon"></i> Run
+                        Benchmark</button>
+                    <div id="demo-perf-result"></div>
+                </div>
+
+                <div class="demo-card">
+                    <h3><i data-lucide="arrow-left-right" class="icon"></i> Type Conversion</h3>
+                    <p>Convert between JavaScript and Rayforce types seamlessly.</p>
+                    <pre><code>// JS array → Rayforce vector
+const vec = rf.vector(Types.F64, [1.5, 2.5, 3.5]);
+
+// Rayforce → JS array
+const arr = vec.toJS();  // [1.5, 2.5, 3.5]
+
+// Table → JS objects
+const rows = table.toRows();</code></pre>
+                    <button class="btn" onclick="demoTypeConversion()"><i data-lucide="play" class="btn-icon"></i> Run
+                        Demo</button>
+                    <div id="demo-typeconv-result"></div>
+                </div>
+
+                <div class="demo-card">
+                    <h3><i data-lucide="sigma" class="icon"></i> Aggregations</h3>
+                    <p>Built-in aggregation functions for data analysis.</p>
+                    <pre><code>const data = rf.eval('(til 100)');
+
+rf.eval('(sum data)')   // 4950
+rf.eval('(avg data)')   // 49.5
+rf.eval('(min data)')   // 0
+rf.eval('(max data)')   // 99</code></pre>
+                    <button class="btn" onclick="demoAggregations()"><i data-lucide="play" class="btn-icon"></i> Run
+                        Demo</button>
+                    <div id="demo-aggr-result"></div>
+                </div>
             </div>
         </div>
-        
-        <section class="examples">
-            <h2>Try these examples</h2>
-            <div class="example-grid">
-                <button class="example-btn" data-expr="(+ 1 2)">
-                    Basic Math
-                    <code>(+ 1 2)</code>
-                    <span class="desc">Add two numbers</span>
-                </button>
-                <button class="example-btn" data-expr="(til 10)">
-                    Range
-                    <code>(til 10)</code>
-                    <span class="desc">Generate 0..9</span>
-                </button>
-                <button class="example-btn" data-expr="[2 3 5 7 11]">
-                    Vector
-                    <code>[2 3 5 7 11]</code>
-                    <span class="desc">Create a vector</span>
-                </button>
-                <button class="example-btn" data-expr="(sum (til 100))">
-                    Sum
-                    <code>(sum (til 100))</code>
-                    <span class="desc">Sum 0..99 = 4950</span>
-                </button>
-                <button class="example-btn" data-expr="(avg [10 20 30 40 50])">
-                    Average
-                    <code>(avg [10 20 30 40 50])</code>
-                    <span class="desc">Calculate mean</span>
-                </button>
-                <button class="example-btn" data-expr="(* [1 2 3] [4 5 6])">
-                    Vector Ops
-                    <code>(* [1 2 3] [4 5 6])</code>
-                    <span class="desc">Element-wise multiply</span>
-                </button>
-                <button class="example-btn" data-expr="(reverse [1 2 3])">
-                    Reverse
-                    <code>(reverse [1 2 3])</code>
-                    <span class="desc">Reverse a vector</span>
-                </button>
-                <button class="example-btn" data-expr="(distinct [1 2 1 3 2 3])">
-                    Distinct
-                    <code>(distinct [1 2 1 3 2 3])</code>
-                    <span class="desc">Unique values</span>
-                </button>
-                <button class="example-btn" data-expr="(group [1 2 1 3 2 1])">
-                    Group
-                    <code>(group [1 2 1 3 2 1])</code>
-                    <span class="desc">Group by value</span>
-                </button>
-                <button class="example-btn" data-expr="(dev [1 2 3 4 5])">
-                    Statistics
-                    <code>(dev [1 2 3 4 5])</code>
-                    <span class="desc">Standard deviation</span>
-                </button>
-                <button class="example-btn" data-expr="(min [5 2 8 1 9])">
-                    Min/Max
-                    <code>(min [5 2 8 1 9])</code>
-                    <span class="desc">Find minimum</span>
-                </button>
-                <button class="example-btn" data-expr="(concat [1 2] [3 4])">
-                    Concat
-                    <code>(concat [1 2] [3 4])</code>
-                    <span class="desc">Join vectors</span>
-                </button>
+
+        <!-- Tables Tab -->
+        <div id="tab-tables" class="tab-panel">
+            <div class="demo-card" style="max-width: 100%;">
+                <h3><i data-lucide="table-properties" class="icon"></i> Interactive Table Demo</h3>
+                <p>Create and manipulate tables with the SDK.</p>
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    <button class="btn" onclick="createSampleTable()"><i data-lucide="table" class="btn-icon"></i>
+                        Create Sample Table</button>
+                    <button class="btn" onclick="addTableRow()"><i data-lucide="plus" class="btn-icon"></i> Add
+                        Row</button>
+                    <button class="btn" onclick="filterTable()"><i data-lucide="filter" class="btn-icon"></i> Filter
+                        score > 85</button>
+                    <button class="btn" onclick="groupByTable()"><i data-lucide="layers" class="btn-icon"></i> Group By
+                        Dept</button>
+                    <button class="btn" onclick="aggregateTable()"><i data-lucide="bar-chart-2" class="btn-icon"></i>
+                        Show Stats</button>
+                </div>
+                <div id="table-display" class="table-display">
+                    <p style="color: var(--text-muted); font-style: italic;">Click "Create Sample Table" to begin</p>
+                </div>
             </div>
-        </section>
+        </div>
     </div>
-    
+
     <footer class="footer">
         <p>
-            <a href="https://rayforcedb.com">RayforceDB</a> • 
-            <a href="https://github.com/RayforceDB/rayforce">GitHub</a> • 
+            <a href="https://rayforcedb.com">RayforceDB</a> •
+            <a href="https://github.com/RayforceDB/rayforce">GitHub</a> •
             <a href="https://rayforcedb.com/docs/">Documentation</a>
         </p>
     </footer>
 
     <script type="module">
+        // ================================================================
+        // SDK Setup
+        // ================================================================
+
         const output = document.getElementById('output');
         const input = document.getElementById('input');
         const status = document.getElementById('status');
         const themeToggle = document.getElementById('themeToggle');
-        
-        let rayforce = null;
-        let evalCmd = null;
-        let objFmt = null;
-        let dropObj = null;
-        let cmdCounter = 0;
-        
-        // Command history for arrow key navigation
+
+        let rf = null; // SDK instance
+        let Types = null;
+        let sampleTable = null;
+
         const history = [];
         let historyIndex = -1;
         let savedInput = '';
-        
+
         // Theme toggle
         function setTheme(theme) {
             document.documentElement.setAttribute('data-theme', theme);
             localStorage.setItem('rf-theme', theme);
         }
-        
+
         themeToggle.addEventListener('click', () => {
             const current = document.documentElement.getAttribute('data-theme');
             setTheme(current === 'dark' ? 'light' : 'dark');
         });
-        
-        // Load saved theme
+
         const savedTheme = localStorage.getItem('rf-theme');
-        if (savedTheme) {
-            setTheme(savedTheme);
-        }
-        
-        // ANSI escape sequence to HTML converter
+        if (savedTheme) setTheme(savedTheme);
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+            });
+        });
+
+        // ANSI to HTML converter
         function ansiToHtml(str) {
             const ansiMap = {
-                '0': '',
-                '1': 'ansi-bold',
-                '30': '',
-                '31': 'ansi-red',
-                '32': 'ansi-green',
-                '33': 'ansi-yellow',
-                '34': 'ansi-blue',
-                '35': 'ansi-magenta',
-                '36': 'ansi-cyan',
-                '37': 'ansi-white',
-                '90': 'ansi-bright-red',
-                '91': 'ansi-bright-red',
-                '92': 'ansi-bright-green',
-                '93': 'ansi-bright-yellow',
-                '94': 'ansi-bright-blue',
-                '95': 'ansi-bright-magenta',
-                '96': 'ansi-bright-cyan',
-                '38;5;9': 'ansi-bright-red',
-                '38;5;11': 'ansi-bright-yellow',
-                '38;5;14': 'ansi-bright-cyan',
+                '0': '', '1': 'ansi-bold',
+                '31': 'ansi-red', '32': 'ansi-green', '33': 'ansi-yellow',
+                '34': 'ansi-blue', '35': 'ansi-magenta', '36': 'ansi-cyan',
             };
-            
+
             let result = '';
-            let currentClasses = [];
+            let currentClass = '';
             let i = 0;
-            
+
             while (i < str.length) {
-                if (str[i] === '\x1b' && str[i+1] === '[') {
+                if (str[i] === '\x1b' && str[i + 1] === '[') {
                     let j = i + 2;
-                    while (j < str.length && !/[A-Za-z]/.test(str[j])) {
-                        j++;
-                    }
-                    
+                    while (j < str.length && !/[A-Za-z]/.test(str[j])) j++;
+
                     if (str[j] === 'm') {
-                        const codes = str.slice(i + 2, j).split(';');
-                        
-                        for (const code of codes) {
-                            if (code === '0' || code === '') {
-                                if (currentClasses.length > 0) {
-                                    result += '</span>';
-                                    currentClasses = [];
-                                }
-                            } else {
-                                const fullCode = codes.join(';');
-                                const cssClass = ansiMap[fullCode] || ansiMap[code];
-                                
-                                if (cssClass && !currentClasses.includes(cssClass)) {
-                                    if (currentClasses.length > 0) {
-                                        result += '</span>';
-                                    }
-                                    currentClasses = [cssClass];
-                                    result += `<span class="${cssClass}">`;
-                                }
-                            }
+                        const code = str.slice(i + 2, j);
+                        if (currentClass) result += '</span>';
+                        if (code !== '0' && ansiMap[code]) {
+                            currentClass = ansiMap[code];
+                            result += `<span class="${currentClass}">`;
+                        } else {
+                            currentClass = '';
                         }
                         i = j + 1;
                         continue;
@@ -685,22 +1120,17 @@
                     i = j + 1;
                     continue;
                 }
-                
+
                 if (str[i] === '<') result += '&lt;';
                 else if (str[i] === '>') result += '&gt;';
-                else if (str[i] === '&') result += '&amp;';
                 else result += str[i];
-                
                 i++;
             }
-            
-            if (currentClasses.length > 0) {
-                result += '</span>';
-            }
-            
+
+            if (currentClass) result += '</span>';
             return result;
         }
-        
+
         function log(message, type = 'system') {
             const line = document.createElement('div');
             line.className = `output-line ${type}`;
@@ -708,75 +1138,74 @@
             output.appendChild(line);
             output.scrollTop = output.scrollHeight;
         }
-        
+
         function setStatus(state, message) {
             status.className = `status ${state}`;
             status.innerHTML = `<span class="status-dot"></span><span>${message}</span>`;
         }
-        
-        async function initRayforce() {
+
+        // ================================================================
+        // SDK Initialization
+        // ================================================================
+
+        async function initSDK() {
             try {
+                // Load WASM module
                 const modulePath = '../dist/rayforce.js';
                 const createRayforce = (await import(modulePath)).default;
-                
+
                 log('Loading WASM binary...');
-                rayforce = await createRayforce();
-                
-                // Use eval_cmd for proper error location tracking
-                evalCmd = rayforce.cwrap('eval_cmd', 'number', ['string', 'string']);
-                objFmt = rayforce.cwrap('strof_obj', 'string', ['number']);
-                dropObj = rayforce.cwrap('drop_obj', null, ['number']);
-                
-                setStatus('ready', 'RayforceDB ready');
-                log('RayforceDB initialized!', 'system');
-                log(`Version: ${rayforce.ccall('version_str', 'string', [], [])}`, 'system');
+                const wasm = await createRayforce();
+
+                // Load SDK
+                const sdk = await import('../dist/rayforce.sdk.js');
+                rf = sdk.createRayforceSDK(wasm);
+                Types = sdk.Types;
+
+                // Expose globally for demo functions
+                window.rf = rf;
+                window.Types = Types;
+
+                setStatus('ready', `RayforceDB ready - v${rf.version}`);
+                log('RayforceDB SDK initialized!', 'system');
+                log(`Version: ${rf.version}`, 'system');
+                log('SDK features: Zero-copy vectors, Tables, Query builder', 'info');
                 log('Type expressions using Rayfall LISP syntax: (function arg1 arg2 ...)', 'system');
-                
+
                 input.disabled = false;
                 input.focus();
-
-                // Execute any code passed via URL (Zulip code playground)
-                executeUrlCode();
 
             } catch (err) {
                 setStatus('error', 'Failed to load');
                 log(`Error: ${err.message}`, 'error');
-                log('Make sure to run: make wasm && make serve', 'system');
+                console.error(err);
             }
         }
-        
+
         function evaluate(expr) {
-            if (!rayforce) return;
-            
-            // Add to history
-            if (expr !== history[history.length - 1]) {
-                history.push(expr);
-            }
+            if (!rf) return;
+
+            if (expr !== history[history.length - 1]) history.push(expr);
             historyIndex = history.length;
             savedInput = '';
-            
+
             log(expr, 'input');
-            
+
             try {
-                // Use eval_cmd with source name for proper error location tracking
-                cmdCounter++;
-                const sourceName = `repl:${cmdCounter}`;
-                const result = evalCmd(expr, sourceName);
-                if (result === 0) {
+                const result = rf.eval(expr);
+                if (result.isError) {
+                    log(result.toString(), 'error');
+                } else if (result.isNull) {
                     log('null', 'result');
                 } else {
-                    const formatted = objFmt(result);
-                    // Detect error responses from Rayforce (e.g. "[E003] error:")
-                    const isError = /\[E\d+\]\s*error/i.test(formatted);
-                    log(formatted, isError ? 'error' : 'result');
-                    dropObj(result);
+                    log(result.toString(), 'result');
                 }
             } catch (err) {
                 log(`Error: ${err.message}`, 'error');
             }
         }
-        
-        // Handle input with history navigation
+
+        // Input handling
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && input.value.trim()) {
                 evaluate(input.value.trim());
@@ -784,12 +1213,7 @@
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 if (history.length === 0) return;
-                
-                // Save current input when starting to navigate
-                if (historyIndex === history.length) {
-                    savedInput = input.value;
-                }
-                
+                if (historyIndex === history.length) savedInput = input.value;
                 if (historyIndex > 0) {
                     historyIndex--;
                     input.value = history[historyIndex];
@@ -805,41 +1229,393 @@
                 }
             }
         });
-        
-        // Handle example buttons
+
+        // Example buttons
         document.querySelectorAll('.example-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const expr = btn.dataset.expr;
-                if (expr && rayforce) {
-                    evaluate(expr);
-                }
+                if (expr && rf) evaluate(expr);
             });
         });
 
-        // Parse URL query parameters for Zulip code playground integration
-        function getCodeFromUrl() {
-            const params = new URLSearchParams(window.location.search);
-            return params.get('code');
+        // ================================================================
+        // Demo Functions
+        // ================================================================
+
+        window.demoZeroCopy = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-zerocopy-result');
+
+            try {
+                // Create vector
+                const vec = rf.vector(Types.I64, [1, 2, 3, 4, 5]);
+                const view = vec.typedArray;
+
+                // Mutate via TypedArray
+                view[0] = 100n;
+                view[4] = 500n;
+
+                // Read back
+                const values = vec.toJS();
+
+                resultDiv.innerHTML = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">
+                        <div style="color: var(--success);">✓ Zero-copy mutation successful!</div>
+                        <div style="margin-top: 0.5rem;">Original: [1, 2, 3, 4, 5]</div>
+                        <div>After mutation: [${values.join(', ')}]</div>
+                        <div style="color: var(--text-muted); margin-top: 0.5rem;">TypedArray: ${view.constructor.name}</div>
+                    </div>
+                `;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        window.demoTable = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-table-result');
+
+            try {
+                const table = rf.table({
+                    id: [1, 2, 3],
+                    name: ['Alice', 'Bob', 'Carol'],
+                    score: [95.5, 87.3, 92.1]
+                });
+
+                const rows = table.toRows();
+                const columns = table.columnNames();
+
+                let html = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px;">
+                        <div style="color: var(--success); margin-bottom: 0.5rem;">✓ Table created!</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">
+                            Columns: ${columns.join(', ')}<br>
+                            Rows: ${rows.length}
+                        </div>
+                    </div>
+                `;
+
+                resultDiv.innerHTML = html;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        window.demoQuery = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-query-result');
+
+            try {
+                // Create a table using SDK
+                const table = rf.table({
+                    name: ['Alice', 'Bob', 'Carol'],
+                    score: [95.5, 87.3, 92.1]
+                });
+
+                // Filter using toRows
+                const rows = table.toRows().filter(r => r.score > 90);
+
+                resultDiv.innerHTML = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">
+                        <div style="color: var(--success);">✓ Query executed!</div>
+                        <div style="margin-top: 0.5rem;">Original: ${table.rowCount} rows</div>
+                        <div>Filtered (score > 90): ${rows.length} rows</div>
+                        <pre style="margin-top: 0.5rem; white-space: pre-wrap;">${JSON.stringify(rows, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        window.demoPerfTest = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-perf-result');
+
+            try {
+                const size = 1000000;
+
+                // Time vector creation
+                const t1 = performance.now();
+                const vec = rf.vector(Types.F64, size);
+                const createTime = performance.now() - t1;
+
+                // Time TypedArray fill
+                const t2 = performance.now();
+                const view = vec.typedArray;
+                for (let i = 0; i < view.length; i++) {
+                    view[i] = Math.random();
+                }
+                const fillTime = performance.now() - t2;
+
+                // Time sum via eval
+                const t3 = performance.now();
+                const sum = rf.eval(`(sum (til ${size}))`).toJS();
+                const sumTime = performance.now() - t3;
+
+                resultDiv.innerHTML = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">
+                        <div style="color: var(--success);">✓ Benchmark complete (${(size / 1000000).toFixed(1)}M elements)</div>
+                        <div style="margin-top: 0.5rem;">
+                            Vector allocation: <span style="color: var(--accent);">${createTime.toFixed(2)}ms</span><br>
+                            TypedArray fill: <span style="color: var(--accent);">${fillTime.toFixed(2)}ms</span><br>
+                            Native sum(til N): <span style="color: var(--accent);">${sumTime.toFixed(2)}ms</span><br>
+                        </div>
+                    </div>
+                `;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        window.demoTypeConversion = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-typeconv-result');
+
+            try {
+                // Create vector from JS array
+                const vec = rf.vector(Types.F64, [1.5, 2.5, 3.5, 4.5]);
+                const jsArray = vec.toJS();
+
+                // Create table and convert to rows
+                const table = rf.table({
+                    x: [1, 2, 3],
+                    y: ['a', 'b', 'c']
+                });
+                const rows = table.toRows();
+
+                resultDiv.innerHTML = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">
+                        <div style="color: var(--success);">✓ Type conversion successful!</div>
+                        <div style="margin-top: 0.5rem;">
+                            <div>Vector → JS: [${jsArray.join(', ')}]</div>
+                            <div style="margin-top: 0.5rem;">Table → Rows:</div>
+                            <pre style="margin: 0.25rem 0;">${JSON.stringify(rows, null, 2)}</pre>
+                        </div>
+                    </div>
+                `;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        window.demoAggregations = function () {
+            if (!rf) return;
+            const resultDiv = document.getElementById('demo-aggr-result');
+
+            try {
+                const data = rf.eval('(til 100)');
+                const sum = rf.eval('(sum (til 100))').toJS();
+                const avg = rf.eval('(avg (til 100))').toJS();
+                const min = rf.eval('(min (til 100))').toJS();
+                const max = rf.eval('(max (til 100))').toJS();
+
+                resultDiv.innerHTML = `
+                    <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">
+                        <div style="color: var(--success);">✓ Aggregations on (til 100):</div>
+                        <div style="margin-top: 0.5rem;">
+                            <div>sum: <span style="color: var(--accent);">${sum}</span></div>
+                            <div>avg: <span style="color: var(--accent);">${typeof avg === 'number' ? avg.toFixed(2) : avg}</span></div>
+                            <div>min: <span style="color: var(--accent);">${min}</span></div>
+                            <div>max: <span style="color: var(--accent);">${max}</span></div>
+                        </div>
+                    </div>
+                `;
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error); margin-top: 1rem;">${err.message}</div>`;
+            }
+        };
+
+        // ================================================================
+        // Table Demo Functions
+        // ================================================================
+
+        function renderTable(table) {
+            const display = document.getElementById('table-display');
+            const columns = table.columnNames();
+            const rowCount = table.rowCount;
+
+            let html = '<table><thead><tr>';
+            for (const col of columns) {
+                html += `<th>${col}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            for (let i = 0; i < Math.min(rowCount, 20); i++) {
+                html += '<tr>';
+                for (const col of columns) {
+                    let val = table.col(col).at(i);
+                    if (typeof val === 'bigint') val = Number(val);
+                    if (typeof val === 'number' && !Number.isInteger(val)) val = val.toFixed(2);
+                    html += `<td>${val}</td>`;
+                }
+                html += '</tr>';
+            }
+
+            html += '</tbody></table>';
+            if (rowCount > 20) {
+                html += `<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 0.85rem;">Showing 20 of ${rowCount} rows</p>`;
+            }
+
+            display.innerHTML = html;
         }
 
-        // Execute code from URL after initialization
-        function executeUrlCode() {
-            const code = getCodeFromUrl();
-            if (code && rayforce) {
-                log('Executing code from URL...', 'system');
-                // Handle multi-line code (newlines may be encoded)
-                const lines = code.split('\n');
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (trimmed) {
-                        evaluate(trimmed);
-                    }
+        window.createSampleTable = function () {
+            if (!rf) return;
+
+            sampleTable = rf.table({
+                id: [1, 2, 3, 4, 5],
+                name: ['Alice', 'Bob', 'Carol', 'David', 'Eve'],
+                department: ['Engineering', 'Sales', 'Engineering', 'Marketing', 'Sales'],
+                score: [95.5, 87.3, 92.1, 78.9, 88.5],
+                active: [true, true, false, true, true]
+            });
+
+            renderTable(sampleTable);
+        };
+
+        window.addTableRow = function () {
+            if (!rf || !sampleTable) {
+                alert('Create a sample table first!');
+                return;
+            }
+
+            // Get current data
+            const rows = sampleTable.toRows();
+            const newId = rows.length + 1;
+            const names = ['Frank', 'Grace', 'Henry', 'Ivy', 'Jack'];
+            const depts = ['Engineering', 'Sales', 'Marketing'];
+            const name = names[Math.floor(Math.random() * names.length)];
+            const dept = depts[Math.floor(Math.random() * depts.length)];
+            const score = parseFloat((70 + Math.random() * 30).toFixed(1));
+
+            // Rebuild table with new row (simple approach for demo)
+            const ids = rows.map(r => r.id).concat([newId]);
+            const namesArr = rows.map(r => r.name).concat([name]);
+            const deptsArr = rows.map(r => r.department).concat([dept]);
+            const scores = rows.map(r => r.score).concat([score]);
+            const actives = rows.map(r => r.active).concat([true]);
+
+            sampleTable = rf.table({
+                id: ids,
+                name: namesArr,
+                department: deptsArr,
+                score: scores,
+                active: actives
+            });
+            renderTable(sampleTable);
+        };
+
+        window.filterTable = function () {
+            if (!rf || !sampleTable) {
+                alert('Create a sample table first!');
+                return;
+            }
+
+            // Filter using JavaScript
+            const rows = sampleTable.toRows().filter(r => r.score > 85);
+            const cols = sampleTable.columnNames();
+
+            // Display filtered results
+            const display = document.getElementById('table-display');
+            let html = '<table><thead><tr>';
+            for (const col of cols) {
+                html += `<th>${col}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            for (const row of rows) {
+                html += '<tr>';
+                for (const col of cols) {
+                    let val = row[col];
+                    if (typeof val === 'number' && !Number.isInteger(val)) val = val.toFixed(2);
+                    html += `<td>${val}</td>`;
                 }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            html += `<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 0.85rem;">Filtered: ${rows.length} of ${sampleTable.rowCount} rows (score > 85)</p>`;
+            display.innerHTML = html;
+        };
+
+        window.groupByTable = function () {
+            if (!rf || !sampleTable) {
+                alert('Create a sample table first!');
+                return;
+            }
+
+            const display = document.getElementById('table-display');
+            const rows = sampleTable.toRows();
+
+            // Group by department
+            const groups = {};
+            for (const row of rows) {
+                const dept = row.department;
+                if (!groups[dept]) {
+                    groups[dept] = { count: 0, totalScore: 0, names: [] };
+                }
+                groups[dept].count++;
+                groups[dept].totalScore += row.score;
+                groups[dept].names.push(row.name);
+            }
+
+            let html = '<table><thead><tr><th>Department</th><th>Count</th><th>Avg Score</th><th>Members</th></tr></thead><tbody>';
+            for (const [dept, data] of Object.entries(groups)) {
+                const avgScore = (data.totalScore / data.count).toFixed(2);
+                html += `<tr>
+                    <td>${dept}</td>
+                    <td>${data.count}</td>
+                    <td>${avgScore}</td>
+                    <td>${data.names.join(', ')}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            html += `<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 0.85rem;">Grouped by department: ${Object.keys(groups).length} groups</p>`;
+            display.innerHTML = html;
+        };
+
+        window.aggregateTable = function () {
+            if (!rf || !sampleTable) {
+                alert('Create a sample table first!');
+                return;
+            }
+
+            const display = document.getElementById('table-display');
+            const scores = sampleTable.col('score').toJS();
+
+            const count = scores.length;
+            const avgScore = scores.reduce((a, b) => a + b, 0) / count;
+            const maxScore = Math.max(...scores);
+            const minScore = Math.min(...scores);
+
+            display.innerHTML = `
+                <div style="font-family: var(--font-mono); font-size: 0.9rem;">
+                    <div style="margin-bottom: 0.5rem;"><strong>Table Statistics:</strong></div>
+                    <div>Row count: <span style="color: var(--accent);">${count}</span></div>
+                    <div>Average score: <span style="color: var(--accent);">${avgScore.toFixed(2)}</span></div>
+                    <div>Max score: <span style="color: var(--accent);">${maxScore.toFixed(2)}</span></div>
+                    <div>Min score: <span style="color: var(--accent);">${minScore.toFixed(2)}</span></div>
+                </div>
+            `;
+        };
+
+        // Check URL for expression parameter
+        function checkUrlExpr() {
+            const params = new URLSearchParams(window.location.search);
+            const expr = params.get('expr');
+            if (expr && rf) {
+                evaluate(decodeURIComponent(expr));
             }
         }
 
-        // Initialize
-        initRayforce();
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Initialize and check URL
+        initSDK().then(() => {
+            checkUrlExpr();
+        });
     </script>
 </body>
+
 </html>

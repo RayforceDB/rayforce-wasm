@@ -1,0 +1,48 @@
+{
+  "name": "rayforce-wasm",
+  "version": "0.1.0",
+  "description": "RayforceDB WASM SDK - High-performance columnar database in WebAssembly",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/rayforce.sdk.js",
+  "types": "dist/rayforce.sdk.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/rayforce.sdk.d.ts"
+    },
+    "./sdk": {
+      "import": "./dist/rayforce.sdk.js",
+      "types": "./dist/rayforce.sdk.d.ts"
+    },
+    "./wasm": {
+      "import": "./dist/rayforce.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "make wasm",
+    "test": "node test.mjs",
+    "serve": "python3 -m http.server 8080"
+  },
+  "keywords": [
+    "rayforce",
+    "database",
+    "wasm",
+    "webassembly",
+    "columnar",
+    "analytics"
+  ],
+  "author": "RayforceDB",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RayforceDB/rayforce-wasm"
+  },
+  "homepage": "https://rayforcedb.com",
+  "devDependencies": {
+    "playwright": "^1.57.0"
+  }
+}

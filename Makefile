@@ -75,7 +75,8 @@ WASM_LDFLAGS = \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MODULARIZE=1 \
 	-s EXPORT_ES6=1 \
-	-s EXPORT_NAME="createRayforce"
+	-s EXPORT_NAME="createRayforce" \
+	-s ENVIRONMENT='web,node'
 
 # Debug linker flags
 # ASSERTIONS          : Runtime assertions
@@ -96,11 +97,7 @@ DEBUG_LDFLAGS = \
 # ============================================================================
 
 # Functions exported to JavaScript
-# Core functions:
-#   _eval_cmd       - Evaluate with source tracking (preferred)
-#   _eval_str       - Simple evaluation (no source tracking)
-#   _get_cmd_counter  - Get current command counter
-#   _reset_cmd_counter - Reset command counter
+# Core functions for full SDK support
 EXPORTED_FUNCTIONS = [ \
 	'_main', \
 	'_version_str', \
@@ -112,7 +109,94 @@ EXPORTED_FUNCTIONS = [ \
 	'_get_cmd_counter', \
 	'_reset_cmd_counter', \
 	'_obj_fmt', \
-	'_strof_obj' \
+	'_strof_obj', \
+	'_TYPE_CODE_LIST', \
+	'_TYPE_CODE_B8', \
+	'_TYPE_CODE_U8', \
+	'_TYPE_CODE_I16', \
+	'_TYPE_CODE_I32', \
+	'_TYPE_CODE_I64', \
+	'_TYPE_CODE_SYMBOL', \
+	'_TYPE_CODE_DATE', \
+	'_TYPE_CODE_TIME', \
+	'_TYPE_CODE_TIMESTAMP', \
+	'_TYPE_CODE_F64', \
+	'_TYPE_CODE_GUID', \
+	'_TYPE_CODE_C8', \
+	'_TYPE_CODE_TABLE', \
+	'_TYPE_CODE_DICT', \
+	'_TYPE_CODE_LAMBDA', \
+	'_TYPE_CODE_NULL', \
+	'_TYPE_CODE_ERR', \
+	'_get_obj_type', \
+	'_get_obj_len', \
+	'_is_obj_atom', \
+	'_is_obj_vector', \
+	'_is_obj_null', \
+	'_is_obj_error', \
+	'_get_obj_rc', \
+	'_get_data_ptr', \
+	'_get_element_size', \
+	'_get_data_byte_size', \
+	'_init_b8', \
+	'_init_u8', \
+	'_init_c8', \
+	'_init_i16', \
+	'_init_i32', \
+	'_init_i64', \
+	'_init_f64', \
+	'_init_date', \
+	'_init_time', \
+	'_init_timestamp', \
+	'_init_symbol_str', \
+	'_init_string_str', \
+	'_read_b8', \
+	'_read_u8', \
+	'_read_c8', \
+	'_read_i16', \
+	'_read_i32', \
+	'_read_i64', \
+	'_read_f64', \
+	'_read_date', \
+	'_read_time', \
+	'_read_timestamp', \
+	'_read_symbol_id', \
+	'_symbol_to_str', \
+	'_init_vector', \
+	'_init_list', \
+	'_vec_at_idx', \
+	'_vec_set_idx', \
+	'_vec_push', \
+	'_vec_insert', \
+	'_vec_resize', \
+	'_fill_i64_vec', \
+	'_fill_i32_vec', \
+	'_fill_f64_vec', \
+	'_init_dict', \
+	'_dict_keys', \
+	'_dict_vals', \
+	'_dict_get', \
+	'_init_table', \
+	'_table_keys', \
+	'_table_vals', \
+	'_table_col', \
+	'_table_row', \
+	'_table_count', \
+	'_query_select', \
+	'_query_update', \
+	'_table_insert', \
+	'_table_upsert', \
+	'_intern_symbol', \
+	'_global_set', \
+	'_quote_obj', \
+	'_serialize', \
+	'_deserialize', \
+	'_get_type_name', \
+	'_at_idx', \
+	'_at_obj', \
+	'_push_obj', \
+	'_ins_obj', \
+	'_set_idx' \
 ]
 
 # Emscripten runtime methods available to JavaScript
@@ -123,7 +207,21 @@ EXPORTED_RUNTIME_METHODS = [ \
 	'getValue', \
 	'setValue', \
 	'UTF8ToString', \
-	'stringToUTF8' \
+	'stringToUTF8', \
+	'lengthBytesUTF8', \
+	'stackAlloc', \
+	'stackSave', \
+	'stackRestore', \
+	'HEAP8', \
+	'HEAP16', \
+	'HEAP32', \
+	'HEAPU8', \
+	'HEAPU16', \
+	'HEAPU32', \
+	'HEAPF32', \
+	'HEAPF64', \
+	'_malloc', \
+	'_free' \
 ]
 
 # ============================================================================
@@ -199,7 +297,7 @@ $(BUILD_DIR)/lib$(TARGET).a: $(CORE_OBJS)
 # WASM Build Targets
 # ============================================================================
 
-# Build optimized WASM release
+# Build optimized WASM release with SDK
 wasm: CFLAGS = $(WASM_CFLAGS)
 wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET).js \
@@ -208,7 +306,12 @@ wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 		-s "EXPORTED_RUNTIME_METHODS=$(EXPORTED_RUNTIME_METHODS)" \
 		$(WASM_LDFLAGS) \
 		-L$(BUILD_DIR) -l$(TARGET)
+	@cp $(SRC_DIR)/rayforce.sdk.js $(DIST_DIR)/rayforce.sdk.js
+	@cp $(SRC_DIR)/rayforce.umd.js $(DIST_DIR)/rayforce.umd.js
+	@cp $(SRC_DIR)/index.js $(DIST_DIR)/index.js
+	@cp $(SRC_DIR)/rayforce.sdk.d.ts $(DIST_DIR)/rayforce.sdk.d.ts
 	@echo "✅ WASM build complete: $(DIST_DIR)/$(TARGET).js"
+	@echo "✅ SDK files copied: rayforce.sdk.js, rayforce.umd.js, index.js, rayforce.sdk.d.ts"
 
 # Build debug version with assertions and safety checks
 wasm-debug: CFLAGS = $(DEBUG_CFLAGS)

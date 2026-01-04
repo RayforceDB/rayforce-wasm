@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RayforceDB Minimal Example</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #e9a033; }
+        pre {
+            background: #0d0d1a;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        code { color: #4ec9b0; }
+        .result { color: #9cdcfe; }
+        button {
+            background: #e9a033;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background: #f0b85a; }
+        #output {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #0d0d1a;
+            border-radius: 8px;
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚡ RayforceDB via CDN</h1>
+    <p>Using <code>https://unpkg.com/rayforce-wasm</code></p>
+    
+    <button onclick="runDemo()">Run Demo</button>
+    
+    <div id="output">Click "Run Demo" to start...</div>
+
+    <!-- Load RayforceDB from CDN -->
+    <script type="module">
+        import createRayforce from 'https://unpkg.com/rayforce-wasm@0.1.0/dist/rayforce.js';
+
+        window.runDemo = async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = 'Loading WASM...';
+
+            try {
+                // Initialize RayforceDB
+                const rf = await createRayforce();
+                
+                // Helper to evaluate and format result
+                const evaluate = (expr) => {
+                    const result = rf._eval_str(expr);
+                    return rf.UTF8ToString(rf._strof_obj(result));
+                };
+                
+                let results = [];
+                
+                // 1. Simple evaluation
+                results.push('📊 <b>Evaluate expressions:</b>');
+                results.push(`(sum [1 2 3 4 5]) = ${evaluate('(sum [1 2 3 4 5])')}`);
+                results.push(`(avg [10 20 30]) = ${evaluate('(avg [10 20 30])')}`);
+                results.push(`(til 10) = ${evaluate('(til 10)')}`);
+                
+                // 2. Vector operations
+                results.push('');
+                results.push('🔢 <b>Vector operations:</b>');
+                results.push(`(* [1 2 3] [4 5 6]) = ${evaluate('(* [1 2 3] [4 5 6])')}`);
+                results.push(`(reverse [1 2 3 4 5]) = ${evaluate('(reverse [1 2 3 4 5])')}`);
+                
+                // 3. Lambda
+                results.push('');
+                results.push('λ <b>Lambda functions:</b>');
+                results.push(`((fn [x] (* x x)) 7) = ${evaluate('((fn [x] (* x x)) 7)')}`);
+                
+                output.innerHTML = '<pre>' + results.join('\n') + '</pre>';
+                
+            } catch (err) {
+                output.innerHTML = `<pre style="color: #ff6b6b;">Error: ${err.message}</pre>`;
+            }
+        };
+    </script>
+</body>
+</html>

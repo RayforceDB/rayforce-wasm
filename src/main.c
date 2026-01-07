@@ -15,8 +15,11 @@
 
 // Rayforce headers (from RAYFORCE_SRC via -I flag)
 #include "binary.h"
+#include "error.h" // Include error.h for err_length
 #include "eval.h"
 #include "format.h"
+#include "io.h" // Include io.h for io_read_csv
+#include "items.h"
 #include "misc.h"
 #include "query.h"
 #include "runtime.h"
@@ -221,6 +224,33 @@ EMSCRIPTEN_KEEPALIVE b8_t is_obj_error(obj_p obj) {
   if (obj == NULL)
     return B8_FALSE;
   return IS_ERR(obj) ? B8_TRUE : B8_FALSE;
+}
+
+// Get error info as a dict with structured error information
+// Returns a dict with keys like: code, message, expected, got, etc.
+EMSCRIPTEN_KEEPALIVE obj_p get_error_info(obj_p err) {
+  if (err == NULL || !IS_ERR(err))
+    return NULL_OBJ;
+  return err_info(err);
+}
+
+// Get error message as a simple string (doesn't allocate, returns pointer to static or inline data)
+EMSCRIPTEN_KEEPALIVE lit_p get_error_message(obj_p err) {
+  if (UNLIKELY(err == NULL || !IS_ERR(err))) {
+    return "Unknown error";
+  }
+  
+  // For EC_USER errors, get the inline message
+  err_code_t code = err_code(err);
+  if (code == EC_USER) {
+    if (LIKELY(err->len > 0)) {
+      return (lit_p)(err + 1);  // Message stored after struct
+    }
+    return "Out of memory";  // Fallback for OOM errors with no message
+  }
+  
+  // For other error types, return the error code name
+  return err_name(code);
 }
 
 // Get reference count
@@ -631,6 +661,187 @@ EMSCRIPTEN_KEEPALIVE obj_p deserialize(obj_p buf) {
 EMSCRIPTEN_KEEPALIVE str_p get_type_name(i8_t type) { return type_name(type); }
 
 // ============================================================================
+// CSV Parsing
+// ============================================================================
+
+// Read CSV from string content
+// - Assumes types are all strings (C8) for simplicity in WASM
+// - Infers column names from first line
+EMSCRIPTEN_KEEPALIVE obj_p read_csv(lit_p content, i64_t len) {
+  i64_t i, l, lines;
+  str_p buf, pos, line, prev;
+  obj_p names, cols, res;
+  c8_t sep = ',';
+
+  if (content == NULL) {
+    printf("ERROR: read_csv content is NULL\n");
+    return err_user("CSV content is NULL");
+  }
+
+  // We receive a heap pointer and byte length from JS.
+  // Trust the length passed in.
+  if (len <= 0) {
+    printf("ERROR: read_csv len <= 0\n");
+    return err_user("CSV length is zero or negative");
+  }
+
+  printf("INFO: read_csv starting, len=%lld bytes (%.1f MB)\n", len, len / (1024.0 * 1024.0));
+
+  // Since we receive a JS string pointer, we shouldn't modify it.
+  // However, parse_csv_lines expects a buffer it can read.
+  // We treat 'content' as the buffer.
+  buf = (str_p)content;
+
+  // Count lines
+  lines = 0;
+  pos = buf;
+  while ((pos = (str_p)memchr(pos, '\n', buf + len - pos))) {
+    ++lines;
+    ++pos;
+  }
+
+  if (len > 0 && buf[len - 1] != '\n') {
+    ++lines;
+  }
+
+  if (lines == 0) {
+    printf("ERROR: read_csv no lines found\n");
+    return err_user("CSV has no lines");
+  }
+
+  printf("INFO: read_csv found %lld lines\n", lines);
+
+  // Parse header
+  pos = (str_p)memchr(buf, '\n', len);
+  i64_t header_len = (pos == NULL) ? len : (pos - buf);
+  line = (pos == NULL) ? NULL : (pos + 1);
+
+  // Count columns based on separator
+  l = 1;
+  pos = buf;
+  while ((pos = (str_p)memchr(pos, sep, header_len - (pos - buf)))) {
+    ++l;
+    ++pos;
+  }
+
+  printf("INFO: read_csv found %lld columns\n", l);
+
+  names = SYMBOL(l);
+  if (names == NULL) {
+    printf("ERROR: read_csv failed to allocate names vector\n");
+    return err_user("Failed to allocate column names");
+  }
+
+  pos = buf;
+  i64_t remaining = header_len;
+
+  for (i = 0; i < l; i++) {
+    prev = pos;
+    str_p next_sep = (str_p)memchr(pos, sep, remaining);
+
+    if (next_sep == NULL) {
+      // Last column
+      if (remaining > 0 && prev[remaining - 1] == '\r') {
+        AS_SYMBOL(names)
+        [i] = io_symbol_from_str_trimmed(prev, remaining - 1);
+      } else {
+        AS_SYMBOL(names)[i] = io_symbol_from_str_trimmed(prev, remaining);
+      }
+      pos += remaining;
+      remaining = 0;
+    } else {
+      AS_SYMBOL(names)
+      [i] = io_symbol_from_str_trimmed(prev, next_sep - prev);
+      remaining -= (next_sep - prev + 1);
+      pos = next_sep + 1;
+    }
+  }
+
+  // Alloc types - default to C8 (String)
+  i8_t *type_arr = (i8_t *)malloc(l * sizeof(i8_t));
+  if (type_arr == NULL) {
+    printf("ERROR: read_csv failed to allocate type_arr\n");
+    drop_obj(names);
+    return err_user("Failed to allocate type array");
+  }
+  for (i = 0; i < l; i++) {
+    type_arr[i] = TYPE_C8;
+  }
+
+  // Exclude header from data lines
+  lines--;
+  if (lines < 0)
+    lines = 0;
+
+  printf("INFO: read_csv allocating %lld columns x %lld rows\n", l, lines);
+
+  // Allocate columns
+  cols = LIST(l);
+  if (cols == NULL) {
+    printf("ERROR: read_csv failed to allocate cols list\n");
+    free(type_arr);
+    drop_obj(names);
+    return err_user("Failed to allocate columns list");
+  }
+
+  for (i = 0; i < l; i++) {
+    AS_LIST(cols)[i] = LIST(lines);
+    if (AS_LIST(cols)[i] == NULL) {
+      printf("ERROR: read_csv failed to allocate column %lld (lines=%lld)\n", i, lines);
+      free(type_arr);
+      drop_obj(names);
+      drop_obj(cols);
+      return err_user("Failed to allocate column data - file too large for memory");
+    }
+  }
+
+  printf("INFO: read_csv column allocation successful, parsing data...\n");
+
+  // parse lines
+  // If line is NULL (only header), we skip parsing
+  if (lines > 0 && line != NULL) {
+    printf("INFO: read_csv calling io_read_csv for %lld lines...\n", lines);
+    res = io_read_csv(type_arr, l, line, len - (line - buf), lines, cols, sep);
+    printf("INFO: read_csv io_read_csv returned: %p, type=%d\n", res, res ? res->type : -999);
+
+    if (res && res->type == TYPE_ERR) {
+      printf("ERROR: read_csv io_read_csv returned error\n");
+      free(type_arr);
+      drop_obj(names);
+      drop_obj(cols);
+      return res;
+    }
+  }
+
+  free(type_arr);
+  
+  // Verify objects are still valid before creating table
+  printf("INFO: read_csv verifying objects - names=%p type=%d len=%lld, cols=%p type=%d len=%lld\n", 
+         names, names ? names->type : -1, names ? names->len : -1,
+         cols, cols ? cols->type : -1, cols ? cols->len : -1);
+  
+  if (names == NULL || cols == NULL) {
+    printf("ERROR: read_csv names or cols became NULL!\n");
+    if (names) drop_obj(names);
+    if (cols) drop_obj(cols);
+    return err_user("Memory corruption - names or cols became NULL");
+  }
+  
+  printf("INFO: read_csv creating table...\n");
+  obj_p t = table(names, cols);
+  printf("INFO: read_csv table() returned: %p\n", t);
+  if (t == NULL) {
+    printf("ERROR: read_csv table() returned NULL - out of memory!\n");
+    drop_obj(names);
+    drop_obj(cols);
+    return err_user("Out of memory: failed to allocate table structure");
+  }
+
+  printf("INFO: read_csv success. Table: %p, rows=%lld, cols=%lld\n", t, lines, l);
+  return t;
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -645,9 +856,10 @@ EMSCRIPTEN_KEEPALIVE i32_t main(i32_t argc, str_p argv[]) {
 
   // Initialize runtime like Python binding does:
   // Pass -r 0 to disable REPL (we'll call eval_str directly from JS)
-  str_p wasm_argv[] = {"rayforce-wasm", "-r", "0", NULL};
+  // Pass -p 1 to force single-threaded mode (avoids pool crashes in WASM)
+  str_p wasm_argv[] = {"rayforce-wasm", "-r", "0", "-p", "1", NULL};
   atexit((void (*)(void))runtime_destroy);
-  runtime = runtime_create(3, wasm_argv);
+  runtime = runtime_create(5, wasm_argv);
 
   if (runtime == NULL) {
     printf("Failed to initialize Rayforce runtime\n");

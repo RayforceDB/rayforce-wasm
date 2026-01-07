@@ -13,7 +13,7 @@
  *   </script>
  */
 
-(function(root, factory) {
+(function (root, factory) {
   if (typeof define === 'function' && define.amd) {
     // AMD
     define([], factory);
@@ -24,7 +24,7 @@
     // Browser global
     root.Rayforce = factory();
   }
-}(typeof self !== 'undefined' ? self : this, function() {
+}(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
   // ============================================================================
@@ -229,12 +229,12 @@
       if (this._typedArray === null) {
         const ArrayType = TYPED_ARRAY_MAP[this._elementType];
         if (!ArrayType) throw new Error(`No TypedArray for type ${this._elementType}`);
-        
+
         const dataPtr = this._sdk._getDataPtr(this._ptr);
         const byteSize = this._sdk._getDataByteSize(this._ptr);
         const elementSize = ELEMENT_SIZES[this._elementType];
         const length = byteSize / elementSize;
-        
+
         this._typedArray = new ArrayType(this._sdk._wasm.HEAPU8.buffer, dataPtr, length);
       }
       return this._typedArray;
@@ -326,12 +326,12 @@
   class Dict extends RayObject {
     keys() { return this._sdk._wrapPtr(this._sdk._dictKeys(this._ptr)); }
     values() { return this._sdk._wrapPtr(this._sdk._dictVals(this._ptr)); }
-    
+
     get(key) {
       const keyObj = typeof key === 'string' ? this._sdk.symbol(key) : key;
       return this._sdk._wrapPtr(this._sdk._dictGet(this._ptr, keyObj._ptr));
     }
-    
+
     has(key) { return !this.get(key).isNull; }
 
     toJS() {
@@ -360,7 +360,7 @@
 
   class Table extends RayObject {
     columns() { return this._sdk._wrapPtr(this._sdk._tableKeys(this._ptr)); }
-    
+
     columnNames() {
       const cols = this.columns();
       const names = [];
@@ -450,11 +450,11 @@
     le(value) { return this._binOp('<=', value); }
     gt(value) { return this._binOp('>', value); }
     ge(value) { return this._binOp('>=', value); }
-    
+
     and(other) { return this._logicOp('and', other); }
     or(other) { return this._logicOp('or', other); }
     not() { return new Expr(this._sdk, ['(not', ...this._parts, ')']); }
-    
+
     sum() { return new Expr(this._sdk, ['(sum', ...this._parts, ')']); }
     avg() { return new Expr(this._sdk, ['(avg', ...this._parts, ')']); }
     min() { return new Expr(this._sdk, ['(min', ...this._parts, ')']); }
@@ -463,22 +463,22 @@
     first() { return new Expr(this._sdk, ['(first', ...this._parts, ')']); }
     last() { return new Expr(this._sdk, ['(last', ...this._parts, ')']); }
     distinct() { return new Expr(this._sdk, ['(distinct', ...this._parts, ')']); }
-    
+
     _binOp(op, value) {
       const valStr = this._valueToStr(value);
       return new Expr(this._sdk, [`(${op}`, ...this._parts, valStr, ')']);
     }
-    
+
     _logicOp(op, other) {
       return new Expr(this._sdk, [`(${op}`, ...this._parts, ...other._parts, ')']);
     }
-    
+
     _valueToStr(value) {
       if (value instanceof Expr) return value.toString();
       if (typeof value === 'string') return `"${value}"`;
       return String(value);
     }
-    
+
     toString() { return this._parts.join(' '); }
   }
 
@@ -564,14 +564,14 @@
 
     _setupBindings() {
       const w = this._wasm;
-      
+
       this._evalCmd = w.cwrap('eval_cmd', 'number', ['string', 'string']);
       this._evalStr = w.cwrap('eval_str', 'number', ['string']);
       this._strOfObj = w.cwrap('strof_obj', 'string', ['number']);
       this._dropObj = w.cwrap('drop_obj', null, ['number']);
       this._cloneObj = w.cwrap('clone_obj', 'number', ['number']);
       this._versionStr = w.cwrap('version_str', 'string', []);
-      
+
       this._getObjType = w.cwrap('get_obj_type', 'number', ['number']);
       this._getObjLen = w.cwrap('get_obj_len', 'number', ['number']);
       this._isObjAtom = w.cwrap('is_obj_atom', 'number', ['number']);
@@ -579,11 +579,11 @@
       this._isObjNull = w.cwrap('is_obj_null', 'number', ['number']);
       this._isObjError = w.cwrap('is_obj_error', 'number', ['number']);
       this._getObjRc = w.cwrap('get_obj_rc', 'number', ['number']);
-      
+
       this._getDataPtr = w.cwrap('get_data_ptr', 'number', ['number']);
       this._getElementSize = w.cwrap('get_element_size', 'number', ['number']);
       this._getDataByteSize = w.cwrap('get_data_byte_size', 'number', ['number']);
-      
+
       this._initB8 = w.cwrap('init_b8', 'number', ['number']);
       this._initU8 = w.cwrap('init_u8', 'number', ['number']);
       this._initC8 = w.cwrap('init_c8', 'number', ['number']);
@@ -596,7 +596,7 @@
       this._initTimestamp = w.cwrap('init_timestamp', 'number', ['number']);
       this._initSymbolStr = w.cwrap('init_symbol_str', 'number', ['string', 'number']);
       this._initStringStr = w.cwrap('init_string_str', 'number', ['string', 'number']);
-      
+
       this._readB8 = w.cwrap('read_b8', 'number', ['number']);
       this._readU8 = w.cwrap('read_u8', 'number', ['number']);
       this._readC8 = w.cwrap('read_c8', 'number', ['number']);
@@ -609,7 +609,9 @@
       this._readTimestamp = w.cwrap('read_timestamp', 'number', ['number']);
       this._readSymbolId = w.cwrap('read_symbol_id', 'number', ['number']);
       this._symbolToStr = w.cwrap('symbol_to_str', 'string', ['number']);
-      
+      // Change signature to number (ptr) to handle manual heap allocation
+      this._readCSV = w.cwrap('read_csv', 'number', ['number', 'number']);
+
       this._initVector = w.cwrap('init_vector', 'number', ['number', 'number']);
       this._initList = w.cwrap('init_list', 'number', ['number']);
       this._vecAtIdx = w.cwrap('vec_at_idx', 'number', ['number', 'number']);
@@ -617,24 +619,24 @@
       this._atObj = w.cwrap('at_obj', 'number', ['number', 'number']);
       this._pushObj = w.cwrap('push_obj', 'number', ['number', 'number']);
       this._insObj = w.cwrap('ins_obj', 'number', ['number', 'number', 'number']);
-      
+
       this._initDict = w.cwrap('init_dict', 'number', ['number', 'number']);
       this._dictKeys = w.cwrap('dict_keys', 'number', ['number']);
       this._dictVals = w.cwrap('dict_vals', 'number', ['number']);
       this._dictGet = w.cwrap('dict_get', 'number', ['number', 'number']);
-      
+
       this._initTable = w.cwrap('init_table', 'number', ['number', 'number']);
       this._tableKeys = w.cwrap('table_keys', 'number', ['number']);
       this._tableVals = w.cwrap('table_vals', 'number', ['number']);
       this._tableCol = w.cwrap('table_col', 'number', ['number', 'string', 'number']);
       this._tableRow = w.cwrap('table_row', 'number', ['number', 'number']);
       this._tableCount = w.cwrap('table_count', 'number', ['number']);
-      
+
       this._querySelect = w.cwrap('query_select', 'number', ['number']);
       this._queryUpdate = w.cwrap('query_update', 'number', ['number']);
       this._tableInsert = w.cwrap('table_insert', 'number', ['number', 'number']);
       this._tableUpsert = w.cwrap('table_upsert', 'number', ['number', 'number', 'number']);
-      
+
       this._internSymbol = w.cwrap('intern_symbol', 'number', ['string', 'number']);
       this._globalSet = w.cwrap('global_set', null, ['number', 'number']);
       this._quoteObj = w.cwrap('quote_obj', 'number', ['number']);
@@ -655,14 +657,14 @@
 
     _wrapPtr(ptr) {
       if (ptr === 0) return new RayNull(this, 0);
-      
+
       const type = this._getObjType(ptr);
       const isAtom = this._isObjAtom(ptr);
       const absType = type < 0 ? -type : type;
-      
+
       if (type === Types.ERR) return new RayError(this, ptr);
       if (type === Types.NULL || this._isObjNull(ptr)) return new RayNull(this, ptr);
-      
+
       if (isAtom) {
         switch (absType) {
           case Types.B8: return new B8(this, ptr);
@@ -680,7 +682,7 @@
           default: return new RayObject(this, ptr);
         }
       }
-      
+
       switch (type) {
         case Types.C8: return new RayString(this, ptr);
         case Types.LIST: return new List(this, ptr);
@@ -701,7 +703,7 @@
     i32(value) { return new I32(this, this._initI32(value | 0)); }
     i64(value) { return new I64(this, this._initI64(Number(value))); }
     f64(value) { return new F64(this, this._initF64(value)); }
-    
+
     date(value) {
       let days;
       if (value instanceof Date) {
@@ -712,18 +714,18 @@
       }
       return new RayDate(this, this._initDate(days));
     }
-    
+
     time(value) {
       let ms;
       if (value instanceof Date) {
-        ms = value.getHours() * 3600000 + value.getMinutes() * 60000 + 
-             value.getSeconds() * 1000 + value.getMilliseconds();
+        ms = value.getHours() * 3600000 + value.getMinutes() * 60000 +
+          value.getSeconds() * 1000 + value.getMilliseconds();
       } else {
         ms = value | 0;
       }
       return new RayTime(this, this._initTime(ms));
     }
-    
+
     timestamp(value) {
       let ns;
       if (value instanceof Date) {
@@ -734,10 +736,10 @@
       }
       return new RayTimestamp(this, this._initTimestamp(ns));
     }
-    
+
     symbol(value) { return new RaySymbol(this, this._initSymbolStr(value, value.length)); }
     string(value) { return new RayString(this, this._initStringStr(value, value.length)); }
-    
+
     vector(type, lengthOrData) {
       if (Array.isArray(lengthOrData)) {
         const arr = lengthOrData;
@@ -754,7 +756,7 @@
       }
       return new Vector(this, this._initVector(type, lengthOrData), type);
     }
-    
+
     list(items) {
       const len = items ? items.length : 0;
       const list = new List(this, this._initList(len));
@@ -765,7 +767,7 @@
       }
       return list;
     }
-    
+
     dict(obj) {
       const keys = Object.keys(obj);
       const keyVec = this.vector(Types.SYMBOL, keys.length);
@@ -776,7 +778,7 @@
       const valList = this.list(Object.values(obj).map(v => this._toRayObject(v)));
       return new Dict(this, this._initDict(keyVec._ptr, valList._ptr));
     }
-    
+
     table(columns) {
       const colNames = Object.keys(columns);
       const keyVec = this.vector(Types.SYMBOL, colNames.length);
@@ -790,23 +792,23 @@
       }
       return new Table(this, this._initTable(keyVec._ptr, valList._ptr));
     }
-    
+
     _arrayToVector(arr) {
       if (arr.length === 0) return this.vector(Types.I64, 0);
-      
+
       const first = arr[0];
       let type;
-      
+
       if (typeof first === 'boolean') type = Types.B8;
       else if (typeof first === 'number') type = Number.isInteger(first) ? Types.I64 : Types.F64;
       else if (typeof first === 'bigint') type = Types.I64;
       else if (typeof first === 'string') type = Types.SYMBOL;
       else if (first instanceof Date) type = Types.TIMESTAMP;
       else return this.list(arr.map(v => this._toRayObject(v)));
-      
+
       const vec = this.vector(type, arr.length);
       const view = vec.typedArray;
-      
+
       for (let i = 0; i < arr.length; i++) {
         if (type === Types.SYMBOL) {
           view[i] = BigInt(this._internSymbol(arr[i], arr[i].length));
@@ -823,10 +825,10 @@
           view[i] = arr[i];
         }
       }
-      
+
       return vec;
     }
-    
+
     _toRayObject(value) {
       if (value instanceof RayObject) return value;
       if (value === null || value === undefined) return new RayNull(this, 0);
@@ -839,17 +841,33 @@
       if (typeof value === 'object') return this.dict(value);
       return new RayNull(this, 0);
     }
-    
+
     set(name, value) {
       const sym = this.symbol(name);
       const val = value instanceof RayObject ? value : this._toRayObject(value);
       this._globalSet(sym._ptr, val._ptr);
     }
-    
+
     get(name) { return this.eval(name); }
     typeName(typeCode) { return this._getTypeName(typeCode); }
-    
+
     col(name) { return Expr.col(this, name); }
+
+    read_csv(content) {
+      if (typeof content !== 'string') throw new Error('Content must be a string');
+
+      // Manually allocate memory on WASM heap to avoid stack overflow with large CSVs
+      const lengthBytes = this._wasm.lengthBytesUTF8(content) + 1;
+      const stringOnHeap = this._wasm._malloc(lengthBytes);
+
+      try {
+        this._wasm.stringToUTF8(content, stringOnHeap, lengthBytes);
+        // Pass pointer and length (excluding null terminator)
+        return new Table(this, this._readCSV(stringOnHeap, lengthBytes - 1));
+      } finally {
+        this._wasm._free(stringOnHeap);
+      }
+    }
   }
 
   // ============================================================================
@@ -869,7 +887,7 @@
       try {
         // For browser usage, we need to load the WASM module
         let createRayforce;
-        
+
         if (typeof window !== 'undefined') {
           // Browser environment - expect global createRayforce or load via script
           if (typeof window.createRayforce === 'function') {
@@ -884,7 +902,7 @@
           const module = await import(wasmPath);
           createRayforce = module.default;
         }
-        
+
         const wasm = await createRayforce({
           rayforce_ready: (msg) => { if (onReady) onReady(msg); }
         });

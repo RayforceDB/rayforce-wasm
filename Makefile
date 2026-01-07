@@ -100,6 +100,8 @@ DEBUG_LDFLAGS = \
 # Core functions for full SDK support
 EXPORTED_FUNCTIONS = [ \
 	'_main', \
+	'_malloc', \
+	'_free', \
 	'_version_str', \
 	'_null', \
 	'_drop_obj', \
@@ -134,6 +136,8 @@ EXPORTED_FUNCTIONS = [ \
 	'_is_obj_vector', \
 	'_is_obj_null', \
 	'_is_obj_error', \
+	'_get_error_info', \
+	'_get_error_message', \
 	'_get_obj_rc', \
 	'_get_data_ptr', \
 	'_get_element_size', \
@@ -162,6 +166,7 @@ EXPORTED_FUNCTIONS = [ \
 	'_read_timestamp', \
 	'_read_symbol_id', \
 	'_symbol_to_str', \
+	'_read_csv', \
 	'_init_vector', \
 	'_init_list', \
 	'_vec_at_idx', \

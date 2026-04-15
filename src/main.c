@@ -801,7 +801,11 @@ EMSCRIPTEN_KEEPALIVE obj_p read_csv(lit_p content, i64_t len) {
   // If line is NULL (only header), we skip parsing
   if (lines > 0 && line != NULL) {
     printf("INFO: read_csv calling io_read_csv for %lld lines...\n", lines);
-    res = io_read_csv(type_arr, l, line, len - (line - buf), lines, cols, sep);
+    i64_t data_size = len - (line - buf);
+    i64_t *line_offsets = NULL;
+    i64_t indexed_lines = io_build_line_index(line, data_size, &line_offsets);
+    res = io_read_csv(type_arr, l, line, data_size, indexed_lines, line_offsets, cols, sep);
+    free(line_offsets);
     printf("INFO: read_csv io_read_csv returned: %p, type=%d\n", res, res ? res->type : -999);
 
     if (res && res->type == TYPE_ERR) {

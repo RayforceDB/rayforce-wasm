@@ -52,7 +52,6 @@ jobs:
           cp dist/index.js _site/
           # Copy examples
           cp examples/index.html _site/
-          cp examples/favicon.ico _site/
           cp -r examples/assets _site/
           # Fix import paths for flat structure
           sed -i 's|../dist/rayforce.js|./rayforce.js|g' _site/index.html

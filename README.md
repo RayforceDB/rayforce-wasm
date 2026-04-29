@@ -184,15 +184,20 @@ Types.U8         // 2  - Unsigned byte
 Types.I16        // 3  - 16-bit integer
 Types.I32        // 4  - 32-bit integer
 Types.I64        // 5  - 64-bit integer
-Types.SYMBOL     // 6  - Interned string
-Types.DATE       // 7  - Date
-Types.TIME       // 8  - Time
-Types.TIMESTAMP  // 9  - Timestamp
-Types.F64        // 10 - 64-bit float
-Types.GUID       // 11 - UUID
-Types.C8         // 12 - Character
+Types.F32        // 6  - 32-bit float
+Types.F64        // 7  - 64-bit float
+Types.DATE       // 8  - Date (days since 2000-01-01)
+Types.TIME       // 9  - Time (ms since midnight)
+Types.TIMESTAMP  // 10 - Timestamp (ns since 2000-01-01)
+Types.GUID       // 11 - 128-bit UUID
+Types.SYM        // 12 - Interned dictionary-encoded string column
+Types.STR        // 13 - Variable-length string (atom or column)
 Types.TABLE      // 98 - Table
 Types.DICT       // 99 - Dictionary
+Types.LAMBDA     // 100 - Function
+Types.NULL       // 126 - Null
+Types.ERR        // 127 - Error
+// Deprecated: Types.SYMBOL and Types.C8 alias Types.SYM (both = 12).
 ```
 
 ### Expression Builder

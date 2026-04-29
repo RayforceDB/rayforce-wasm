@@ -16,8 +16,10 @@ SRC_DIR = $(EXEC_DIR)/src
 OBJ_DIR = $(BUILD_DIR)/obj
 
 # Rayforce source location: use RAYFORCE_SRC_DIR env var or default to ../rayforce
+# v2 layout: public umbrella header in include/, sources nested under src/{core,io,lang,mem,ops,store,table,vec}.
 RAYFORCE_SRC_DIR ?= ../rayforce
-RAYFORCE_SRC = $(RAYFORCE_SRC_DIR)/core
+RAYFORCE_SRC     = $(RAYFORCE_SRC_DIR)/src
+RAYFORCE_INC     = $(RAYFORCE_SRC_DIR)/include
 
 # ============================================================================
 # Emscripten Toolchain
@@ -96,35 +98,34 @@ DEBUG_LDFLAGS = \
 # Exported Functions & Runtime Methods
 # ============================================================================
 
-# Functions exported to JavaScript
-# Core functions for full SDK support
+# Functions exported to JavaScript.
+# Names map to C symbols with a leading underscore (Emscripten convention).
+# Naming is kept stable across the v2 migration — JS SDK cwraps these names.
 EXPORTED_FUNCTIONS = [ \
 	'_main', \
 	'_malloc', \
 	'_free', \
 	'_version_str', \
-	'_null', \
-	'_drop_obj', \
-	'_clone_obj', \
-	'_eval_str', \
 	'_eval_cmd', \
 	'_get_cmd_counter', \
 	'_reset_cmd_counter', \
-	'_obj_fmt', \
 	'_strof_obj', \
+	'_ray_release', \
+	'_ray_retain', \
 	'_TYPE_CODE_LIST', \
 	'_TYPE_CODE_B8', \
 	'_TYPE_CODE_U8', \
 	'_TYPE_CODE_I16', \
 	'_TYPE_CODE_I32', \
 	'_TYPE_CODE_I64', \
-	'_TYPE_CODE_SYMBOL', \
+	'_TYPE_CODE_F32', \
+	'_TYPE_CODE_F64', \
 	'_TYPE_CODE_DATE', \
 	'_TYPE_CODE_TIME', \
 	'_TYPE_CODE_TIMESTAMP', \
-	'_TYPE_CODE_F64', \
 	'_TYPE_CODE_GUID', \
-	'_TYPE_CODE_C8', \
+	'_TYPE_CODE_SYM', \
+	'_TYPE_CODE_STR', \
 	'_TYPE_CODE_TABLE', \
 	'_TYPE_CODE_DICT', \
 	'_TYPE_CODE_LAMBDA', \
@@ -138,16 +139,18 @@ EXPORTED_FUNCTIONS = [ \
 	'_is_obj_error', \
 	'_get_error_info', \
 	'_get_error_message', \
+	'_get_error_code', \
+	'_get_error_trace', \
 	'_get_obj_rc', \
 	'_get_data_ptr', \
 	'_get_element_size', \
 	'_get_data_byte_size', \
 	'_init_b8', \
 	'_init_u8', \
-	'_init_c8', \
 	'_init_i16', \
 	'_init_i32', \
 	'_init_i64', \
+	'_init_f32', \
 	'_init_f64', \
 	'_init_date', \
 	'_init_time', \
@@ -156,16 +159,19 @@ EXPORTED_FUNCTIONS = [ \
 	'_init_string_str', \
 	'_read_b8', \
 	'_read_u8', \
-	'_read_c8', \
 	'_read_i16', \
 	'_read_i32', \
 	'_read_i64', \
+	'_read_f32', \
 	'_read_f64', \
 	'_read_date', \
 	'_read_time', \
 	'_read_timestamp', \
 	'_read_symbol_id', \
 	'_symbol_to_str', \
+	'_str_atom_ptr', \
+	'_str_atom_len', \
+	'_str_vec_get', \
 	'_read_csv', \
 	'_init_vector', \
 	'_init_list', \
@@ -173,7 +179,6 @@ EXPORTED_FUNCTIONS = [ \
 	'_vec_set_idx', \
 	'_vec_push', \
 	'_vec_insert', \
-	'_vec_resize', \
 	'_fill_i64_vec', \
 	'_fill_i32_vec', \
 	'_fill_f64_vec', \
@@ -193,15 +198,7 @@ EXPORTED_FUNCTIONS = [ \
 	'_table_upsert', \
 	'_intern_symbol', \
 	'_global_set', \
-	'_quote_obj', \
-	'_serialize', \
-	'_deserialize', \
-	'_get_type_name', \
-	'_at_idx', \
-	'_at_obj', \
-	'_push_obj', \
-	'_ins_obj', \
-	'_set_idx' \
+	'_get_type_name' \
 ]
 
 # Emscripten runtime methods available to JavaScript
@@ -236,14 +233,17 @@ EXPORTED_RUNTIME_METHODS = [ \
 # Target name
 TARGET = rayforce
 
-# Rayforce core sources
-# Exclude: main.c (native entry point - we use our own main.c)
-# Exclude: epoll.c, iocp.c, kqueue.c (platform-specific poll implementations)
-# Exclude: wasm.c (included by poll.c for WASM platform)
-EXCLUDE_CORE = main.c epoll.c iocp.c kqueue.c wasm.c
-ALL_CORE_SRCS = $(wildcard $(RAYFORCE_SRC)/*.c)
-CORE_SRCS = $(filter-out $(addprefix $(RAYFORCE_SRC)/, $(EXCLUDE_CORE)), $(ALL_CORE_SRCS))
-CORE_OBJS = $(patsubst $(RAYFORCE_SRC)/%.c, $(OBJ_DIR)/%.o, $(CORE_SRCS))
+# Rayforce core sources (paths are relative to RAYFORCE_SRC = $(RAYFORCE_SRC_DIR)/src).
+# Exclude:
+#   - app/* — native CLI entry points (main, REPL, terminal); we provide our own main.c
+#   - core/{epoll,iocp,kqueue,sock,poll}.c — platform-specific I/O multiplexing not relevant to WASM
+# Files in store/ that pull non-WASM mmap/io paths get added here on first linker error.
+EXCLUDE_CORE  = app/main.c app/repl.c app/term.c \
+                core/epoll.c core/iocp.c core/kqueue.c core/sock.c core/poll.c \
+                core/ipc.c
+ALL_CORE_SRCS = $(wildcard $(RAYFORCE_SRC)/*/*.c)
+CORE_SRCS     = $(filter-out $(addprefix $(RAYFORCE_SRC)/, $(EXCLUDE_CORE)), $(ALL_CORE_SRCS))
+CORE_OBJS     = $(patsubst $(RAYFORCE_SRC)/%.c, $(OBJ_DIR)/%.o, $(CORE_SRCS))
 
 # WASM project entry point (this project's main.c)
 WASM_MAIN = $(SRC_DIR)/main.c
@@ -286,13 +286,15 @@ $(OBJ_DIR):
 $(DIST_DIR):
 	@mkdir -p $(DIST_DIR)
 
-# Compile rayforce core object files
+# Compile rayforce core object files. Object paths are nested (e.g. obj/core/runtime.o,
+# obj/lang/eval.o), so the recipe creates the parent dir on demand.
 $(OBJ_DIR)/%.o: $(RAYFORCE_SRC)/%.c | $(OBJ_DIR)
-	$(CC) -include $(RAYFORCE_SRC)/def.h -c $< $(CFLAGS) -o $@
+	@mkdir -p $(@D)
+	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
 
 # Compile WASM main entry point
 $(WASM_MAIN_OBJ): $(WASM_MAIN) | $(OBJ_DIR)
-	$(CC) -include $(RAYFORCE_SRC)/def.h -iquote $(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
+	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
 
 # Build static library
 $(BUILD_DIR)/lib$(TARGET).a: $(CORE_OBJS)
@@ -388,7 +390,7 @@ clean:
 clean-all: clean
 	@echo "🧹 Cleaning all generated files..."
 	@rm -rf $(BUILD_DIR)
-	@rm -rf $(RAYFORCE_SRC)
+	@rm -rf $(SRC_DIR)/rayforce-repo
 	@echo "✅ Full clean complete"
 
 # ============================================================================

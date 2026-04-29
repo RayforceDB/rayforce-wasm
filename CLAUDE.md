@@ -124,7 +124,7 @@ console.log(table.toRows());
 
 ## Type System
 
-### Type Codes (matching Python bindings)
+### Type Codes (v2 engine — RAY_F32 inserted at slot 6 shifts later codes)
 
 | Type | Code | TypedArray | Description |
 |------|------|------------|-------------|
@@ -134,15 +134,22 @@ console.log(table.toRows());
 | I16 | 3 | Int16Array | 16-bit integer |
 | I32 | 4 | Int32Array | 32-bit integer |
 | I64 | 5 | BigInt64Array | 64-bit integer |
-| SYMBOL | 6 | BigInt64Array | Interned string |
-| DATE | 7 | Int32Array | Days since 2000-01-01 |
-| TIME | 8 | Int32Array | Milliseconds since midnight |
-| TIMESTAMP | 9 | BigInt64Array | Nanoseconds since 2000-01-01 |
-| F64 | 10 | Float64Array | 64-bit float |
+| F32 | 6 | Float32Array | 32-bit float |
+| F64 | 7 | Float64Array | 64-bit float |
+| DATE | 8 | Int32Array | Days since 2000-01-01 |
+| TIME | 9 | Int32Array | Milliseconds since midnight |
+| TIMESTAMP | 10 | BigInt64Array | Nanoseconds since 2000-01-01 |
 | GUID | 11 | - | 128-bit UUID |
-| C8 | 12 | Uint8Array | Character/String |
+| SYM | 12 | BigInt64Array | Interned dictionary-encoded string column |
+| STR | 13 | - | Variable-length string (atom or column) |
 | TABLE | 98 | - | Table |
 | DICT | 99 | - | Dictionary |
+| LAMBDA | 100 | - | Function |
+| NULL | 126 | - | Null |
+| ERR | 127 | - | Error |
+
+`Types.SYMBOL` and `Types.C8` are kept as deprecated aliases mapping to
+`Types.SYM` (12); update consumers before the next major release.
 
 ### Atoms vs Vectors
 
@@ -152,11 +159,11 @@ console.log(table.toRows());
 ## Exported WASM Functions
 
 ### Core
-- `eval_cmd(code, sourceName)` - Evaluate with source tracking
-- `eval_str(code)` - Simple evaluation
-- `strof_obj(ptr)` - Format object to string
-- `drop_obj(ptr)` - Free object memory
-- `clone_obj(ptr)` - Clone object
+- `eval_cmd(code, sourceName)` - Evaluate with source-tracked nfo
+- `strof_obj(ptr)` - Format object to string (mode=full)
+- `ray_release(ptr)` - Decrement refcount (no-op for arena/error blocks)
+- `ray_retain(ptr)` - Increment refcount
+- `version_str()` - Engine version (e.g. "2.1.0")
 
 ### Type Introspection
 - `get_obj_type(ptr)` - Get type code
@@ -172,18 +179,20 @@ console.log(table.toRows());
 - `get_data_byte_size(ptr)` - Get total data size
 
 ### Constructors
-- `init_b8`, `init_u8`, `init_c8`, `init_i16`, `init_i32`, `init_i64`, `init_f64`
+- `init_b8`, `init_u8`, `init_i16`, `init_i32`, `init_i64`, `init_f32`, `init_f64`
 - `init_date`, `init_time`, `init_timestamp`
 - `init_symbol_str`, `init_string_str`
 - `init_vector`, `init_list`, `init_dict`, `init_table`
 
 ### Readers
-- `read_b8`, `read_u8`, `read_c8`, `read_i16`, `read_i32`, `read_i64`, `read_f64`
+- `read_b8`, `read_u8`, `read_i16`, `read_i32`, `read_i64`, `read_f32`, `read_f64`
 - `read_date`, `read_time`, `read_timestamp`
 - `read_symbol_id`, `symbol_to_str`
+- `str_atom_ptr`, `str_atom_len`, `str_vec_get` (RAY_STR helpers)
+- `get_error_code`, `get_error_message`, `get_error_trace`, `get_error_info`
 
 ### Vector Operations
-- `vec_at_idx`, `vec_set_idx`, `vec_push`, `vec_insert`, `vec_resize`
+- `vec_at_idx`, `vec_set_idx`, `vec_push`, `vec_insert`
 - `fill_i64_vec`, `fill_i32_vec`, `fill_f64_vec`
 
 ### Container Operations

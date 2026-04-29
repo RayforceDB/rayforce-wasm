@@ -14,18 +14,23 @@ export declare const Types: {
   readonly I16: 3;
   readonly I32: 4;
   readonly I64: 5;
-  readonly SYMBOL: 6;
-  readonly DATE: 7;
-  readonly TIME: 8;
-  readonly TIMESTAMP: 9;
-  readonly F64: 10;
+  readonly F32: 6;
+  readonly F64: 7;
+  readonly DATE: 8;
+  readonly TIME: 9;
+  readonly TIMESTAMP: 10;
   readonly GUID: 11;
-  readonly C8: 12;
+  readonly SYM: 12;
+  readonly STR: 13;
   readonly TABLE: 98;
   readonly DICT: 99;
   readonly LAMBDA: 100;
   readonly NULL: 126;
   readonly ERR: 127;
+  /** Deprecated alias for SYM (was the v1 SYMBOL slot at 6). */
+  readonly SYMBOL: 12;
+  /** Deprecated alias for SYM (was the v1 C8 char vector slot at 12). */
+  readonly C8: 12;
 };
 
 export type TypeCode = typeof Types[keyof typeof Types];
@@ -95,11 +100,6 @@ export declare class U8 extends RayObject {
   toJS(): number;
 }
 
-export declare class C8 extends RayObject {
-  readonly value: string;
-  toJS(): string;
-}
-
 export declare class I16 extends RayObject {
   readonly value: number;
   toJS(): number;
@@ -111,6 +111,11 @@ export declare class I32 extends RayObject {
 }
 
 export declare class I64 extends RayObject {
+  readonly value: number;
+  toJS(): number;
+}
+
+export declare class F32 extends RayObject {
   readonly value: number;
   toJS(): number;
 }
@@ -138,13 +143,16 @@ export declare class RayTimestamp extends RayObject {
   toJS(): Date;
 }
 
-export declare class Symbol extends RayObject {
+export declare class Sym extends RayObject {
   /** Interned symbol ID */
   readonly id: number;
-  /** String value */
+  /** String value (reverse-looked up from the intern table) */
   readonly value: string;
   toJS(): string;
 }
+
+/** Deprecated: prefer `Sym`. Kept for one release for binary-compat. */
+export { Sym as Symbol };
 
 export declare class GUID extends RayObject {
   toJS(): string;
@@ -155,6 +163,9 @@ export declare class RayNull extends RayObject {
 }
 
 export declare class RayError extends RayObject {
+  /** Inline 7-byte error code (e.g. "type", "domain", "user", "oom"). */
+  readonly code: string;
+  /** Per-VM error message text — captured eagerly from a stable buffer. */
   readonly message: string;
   toJS(): never;
 }
@@ -189,11 +200,22 @@ export declare class Vector<T extends TypedArray = TypedArray> extends RayObject
 }
 
 /**
- * String (character vector)
+ * String atom (RAY_STR).  v2 unifies strings as atoms with SSO inline
+ * storage for ≤7 bytes and an extension block for longer strings.
  */
-export declare class RayString extends Vector<Uint8Array> {
+export declare class RayString extends RayObject {
   readonly value: string;
   toJS(): string;
+}
+
+/**
+ * String column (RAY_STR vector).  Per-cell reads via str_vec_get; not
+ * typed-array-viewable.
+ */
+export declare class StrVector extends RayObject {
+  at(idx: number): string;
+  toJS(): string[];
+  [Symbol.iterator](): Iterator<string>;
 }
 
 /**
@@ -347,12 +369,13 @@ export declare class SelectQuery {
 // SDK Class
 // ============================================================================
 
-type TypedArray = 
-  | Int8Array 
-  | Uint8Array 
-  | Int16Array 
-  | Int32Array 
-  | BigInt64Array 
+type TypedArray =
+  | Int8Array
+  | Uint8Array
+  | Int16Array
+  | Int32Array
+  | BigInt64Array
+  | Float32Array
   | Float64Array;
 
 /**
@@ -389,19 +412,19 @@ export declare class RayforceSDK {
   
   /** Create an unsigned byte value */
   u8(value: number): U8;
-  
-  /** Create a character value */
-  c8(value: string): C8;
-  
+
   /** Create a 16-bit integer */
   i16(value: number): I16;
-  
+
   /** Create a 32-bit integer */
   i32(value: number): I32;
-  
+
   /** Create a 64-bit integer */
   i64(value: number | bigint): I64;
-  
+
+  /** Create a 32-bit float */
+  f32(value: number): F32;
+
   /** Create a 64-bit float */
   f64(value: number): F64;
   
@@ -415,7 +438,7 @@ export declare class RayforceSDK {
   timestamp(value: number | bigint | Date): RayTimestamp;
   
   /** Create a symbol (interned string) */
-  symbol(value: string): Symbol;
+  symbol(value: string): Sym;
   
   /** Create a string */
   string(value: string): RayString;
@@ -444,7 +467,13 @@ export declare class RayforceSDK {
    * @param columns - Object with column names as keys and arrays as values
    */
   table(columns: Record<string, any[]>): Table;
-  
+
+  /**
+   * Load a CSV from a buffer.  Writes to Emscripten MEMFS, calls the
+   * file-based ray_read_csv, then unlinks.
+   */
+  readCSV(buffer: Uint8Array | ArrayBuffer, name?: string): Table | RayError;
+
   // ==========================================================================
   // Utility Methods
   // ==========================================================================

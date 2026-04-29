@@ -1,5 +1,5 @@
 /*
- *   RayforceDB WASM Entry Point
+ *   RayforceDB WASM Entry Point — v2 engine
  *
  *   This file provides the main entry point and exported functions
  *   for the WebAssembly build of RayforceDB.
@@ -7,896 +7,804 @@
  *   Provides a comprehensive JavaScript SDK with zero-copy ArrayBuffer views.
  */
 
-// System headers (string.h is already included via def.h)
-#include <dirent.h>
 #include <emscripten.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-// Rayforce headers (from RAYFORCE_SRC via -I flag)
-#include "binary.h"
-#include "error.h" // Include error.h for err_length
-#include "eval.h"
-#include "format.h"
-#include "io.h" // Include io.h for io_read_csv
-#include "items.h"
-#include "misc.h"
-#include "query.h"
-#include "runtime.h"
-#include "string.h"
-#include "sys.h"
-#include "update.h"
-#include "util.h"
+/* Public umbrella header — atom/vector/list/dict/table/sym/error API. */
+#include <rayforce.h>
 
-#define __ABOUT                                                                \
-  "\
-  %s%sRayforceDB: %d.%d %s\n\
-  WASM target\n\
-  Started from: %s\n\
-  Documentation: https://rayforcedb.com/\n\
-  Github: https://github.com/RayforceDB/rayforce%s\n"
+/* Internal-engine functions we reach for WASM glue.  We declare them as
+ * externs (rather than including the headers) because core/runtime.h and
+ * lang/eval.h each define their own ray_vm_t with incompatible internal
+ * fields — including both in one TU collides.  These prototypes are stable
+ * across the engine's internal headers. */
+typedef struct ray_runtime_t ray_runtime_t;
 
-// ============================================================================
-// Command history and source tracking
-// ============================================================================
+extern ray_runtime_t* ray_runtime_create(int argc, char** argv);
+extern void           ray_runtime_destroy(ray_runtime_t* rt);
+extern const char*    ray_error_msg(void);
 
-// Command counter for unique error location tracking
-static i64_t __CMD_COUNTER = 0;
+extern ray_t*  ray_eval_str(const char* source);
+extern ray_t*  ray_eval_get_nfo(void);
+extern void    ray_eval_set_nfo(ray_t* nfo);
+extern ray_t*  ray_get_error_trace(void);
 
-// ============================================================================
-// JavaScript callbacks
-// ============================================================================
+extern ray_t*  ray_select_fn(ray_t** args, int64_t n);
+extern ray_t*  ray_update_fn(ray_t** args, int64_t n);
+extern ray_t*  ray_insert_fn(ray_t** args, int64_t n);
+extern ray_t*  ray_upsert_fn(ray_t** args, int64_t n);
 
-// Declare rayforce_ready callback on js side
-EM_JS(nil_t, js_rayforce_ready, (str_p text), {
+extern ray_t*  ray_nfo_create(const char* filename, size_t fname_len,
+                              const char* source,   size_t src_len);
+
+extern ray_t*       ray_fmt(ray_t* obj, int mode);
+extern const char*  ray_type_name(int8_t type);
+
+extern ray_t*  ray_read_csv(const char* path);
+
+/* ============================================================================
+ * IPC stubs
+ *
+ * src/core/ipc.c is excluded from the WASM build (uses select()/sockets).
+ * src/ops/system.c still references these symbols, so provide weak stubs
+ * that return "nyi" errors at runtime.  Browsers can't open raw TCP sockets
+ * from WASM anyway — these would be unsuitable even if the engine code
+ * compiled.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE int64_t ray_ipc_connect(const char* host, uint16_t port,
+                                             const char* user, const char* pw) {
+  (void)host; (void)port; (void)user; (void)pw;
+  return -1;
+}
+
+EMSCRIPTEN_KEEPALIVE void ray_ipc_close(int64_t handle) { (void)handle; }
+
+EMSCRIPTEN_KEEPALIVE ray_t* ray_ipc_send(int64_t handle, ray_t* msg) {
+  (void)handle; (void)msg;
+  return ray_error("nyi", "IPC not available in WASM build");
+}
+
+/* ANSI escapes for the boot banner. */
+#define BOLD   "\033[1m"
+#define YELLOW "\033[33m"
+#define RESET  "\033[0m"
+
+#define ABOUT_BANNER                                                           \
+  "\n  %s%sRayforceDB: %s\n"                                                   \
+  "  WASM target\n"                                                            \
+  "  Documentation: https://rayforcedb.com/\n"                                 \
+  "  Github: https://github.com/RayforceDB/rayforce%s\n"
+
+/* ============================================================================
+ * Static state
+ * ============================================================================ */
+
+static int64_t           g_cmd_counter   = 0;
+static ray_runtime_t*    g_runtime       = NULL;
+static ray_t*            g_last_format   = NULL;  /* keeps strof_obj's RAY_STR alive */
+static char              g_version_buf[64];
+static char              g_sym_to_str_buf[256];   /* symbol_to_str scratch */
+static char              g_strof_buf[8192];       /* strof_obj scratch */
+static char              g_str_vec_buf[8192];     /* str_vec_get per-cell scratch */
+static char              g_err_msg_buf[256];      /* error message snapshot */
+
+/* ============================================================================
+ * JS callbacks
+ * ============================================================================ */
+
+EM_JS(void, js_rayforce_ready, (const char* text), {
   if (Module.rayforce_ready) {
     Module.rayforce_ready(UTF8ToString(text));
   }
 });
 
-// ============================================================================
-// Helper functions
-// ============================================================================
+/* ============================================================================
+ * Core: version, formatting
+ * ============================================================================ */
 
-static nil_t list_examples(obj_p *dst) {
-  DIR *dir;
-  struct dirent *entry;
-
-  str_fmt_into(dst, -1, "\n  -- Here is the list of examples:\n");
-
-  // Attempt to open the directory
-  dir = opendir("examples/");
-  if (dir == NULL)
-    return;
-
-  // Read each entry in the directory
-  while ((entry = readdir(dir)) != NULL) {
-    if (strncmp(entry->d_name, ".", 1) == 0 ||
-        strncmp(entry->d_name, "..", 2) == 0)
-      continue;
-    str_fmt_into(dst, -1, "  |- %s\n", entry->d_name);
-  }
-
-  // Close the directory
-  closedir(dir);
-
-  str_fmt_into(
-      dst, -1,
-      "  -- To try an example, type: (load \"examples/<example_name>)\"\n");
-
-  return;
+EMSCRIPTEN_KEEPALIVE const char* version_str(void) {
+  snprintf(g_version_buf, sizeof(g_version_buf), "%s", ray_version_string());
+  return g_version_buf;
 }
 
-// ============================================================================
-// Core WASM exports
-// ============================================================================
-
-// Version string buffer
-static c8_t version_buf[64];
-
-// Last formatted result (kept alive until next format call)
-static obj_p last_formatted = NULL;
-
-EMSCRIPTEN_KEEPALIVE str_p version_str(nil_t) {
-  sys_info_t info = sys_info(1);
-  snprintf(version_buf, sizeof(version_buf), "%d.%d (%s)", info.major_version,
-           info.minor_version, info.build_date);
-  return version_buf;
+/* Format any object to a NUL-terminated string for JS consumption.
+ * The previous formatted ray_t is released; the returned pointer is valid
+ * until the next strof_obj() call. */
+EMSCRIPTEN_KEEPALIVE const char* strof_obj(ray_t* obj) {
+  if (g_last_format) {
+    ray_release(g_last_format);
+    g_last_format = NULL;
+  }
+  if (!obj) {
+    g_strof_buf[0] = '\0';
+    return g_strof_buf;
+  }
+  ray_t* s = ray_fmt(obj, 1);  /* mode 1 = full / REPL */
+  if (!s || RAY_IS_ERR(s)) {
+    g_strof_buf[0] = '\0';
+    if (s) ray_error_free(s);
+    return g_strof_buf;
+  }
+  g_last_format = s;
+  size_t n = ray_str_len(s);
+  if (n >= sizeof(g_strof_buf)) n = sizeof(g_strof_buf) - 1;
+  memcpy(g_strof_buf, ray_str_ptr(s), n);
+  g_strof_buf[n] = '\0';
+  return g_strof_buf;
 }
 
-// Format any object to a string for JS consumption
-EMSCRIPTEN_KEEPALIVE str_p strof_obj(obj_p obj) {
-  // Free previous formatted result
-  if (last_formatted != NULL) {
-    drop_obj(last_formatted);
-  }
-  // Format the object (full=true for complete output)
-  last_formatted = obj_fmt(obj, B8_TRUE);
-  return AS_C8(last_formatted);
-}
+/* ============================================================================
+ * Eval (with source-location tracking via nfo)
+ * ============================================================================ */
 
-// ============================================================================
-// Source-tracking evaluation functions
-// ============================================================================
+EMSCRIPTEN_KEEPALIVE ray_t* eval_cmd(const char* cmd, const char* name) {
+  if (!cmd) return RAY_NULL_OBJ;
 
-// Evaluate a command with source tracking for proper error locations
-EMSCRIPTEN_KEEPALIVE obj_p eval_cmd(lit_p cmd, lit_p name) {
-  obj_p str_obj, name_obj, result;
-  c8_t auto_name[32];
-
-  if (cmd == NULL)
-    return NULL_OBJ;
-
-  // Create string object from command
-  str_obj = string_from_str(cmd, strlen(cmd));
-
-  // Create or auto-generate source name
-  if (name != NULL && name[0] != '\0') {
-    name_obj = string_from_str(name, strlen(name));
-  } else {
-    // Auto-generate name like "cmd:1", "cmd:2", etc.
-    snprintf(auto_name, sizeof(auto_name), "cmd:%lld", ++__CMD_COUNTER);
-    name_obj = string_from_str(auto_name, strlen(auto_name));
+  char auto_name[32];
+  if (!name || !name[0]) {
+    snprintf(auto_name, sizeof(auto_name), "cmd:%lld",
+             (long long)++g_cmd_counter);
+    name = auto_name;
   }
 
-  // Evaluate with source tracking
-  result = ray_eval_str(str_obj, name_obj);
+  ray_t* nfo  = ray_nfo_create(name, strlen(name), cmd, strlen(cmd));
+  ray_t* prev = ray_eval_get_nfo();
+  if (nfo && !RAY_IS_ERR(nfo)) ray_eval_set_nfo(nfo);
 
-  // Cleanup input objects
-  drop_obj(str_obj);
-  drop_obj(name_obj);
+  ray_t* result = ray_eval_str(cmd);
 
+  ray_eval_set_nfo(prev);
+  if (nfo && !RAY_IS_ERR(nfo)) ray_release(nfo);
   return result;
 }
 
-// Get current command counter
-EMSCRIPTEN_KEEPALIVE i64_t get_cmd_counter(nil_t) { return __CMD_COUNTER; }
+EMSCRIPTEN_KEEPALIVE int64_t get_cmd_counter(void) { return g_cmd_counter; }
+EMSCRIPTEN_KEEPALIVE void    reset_cmd_counter(void) { g_cmd_counter = 0; }
 
-// Reset command counter
-EMSCRIPTEN_KEEPALIVE nil_t reset_cmd_counter(nil_t) { __CMD_COUNTER = 0; }
+/* ============================================================================
+ * Type code constants (exported numerics for the JS Types enum)
+ * ============================================================================ */
 
-// ============================================================================
-// Type Code Constants (exported for JS)
-// ============================================================================
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_LIST(void)      { return RAY_LIST; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_B8(void)        { return RAY_BOOL; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_U8(void)        { return RAY_U8; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_I16(void)       { return RAY_I16; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_I32(void)       { return RAY_I32; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_I64(void)       { return RAY_I64; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_F32(void)       { return RAY_F32; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_F64(void)       { return RAY_F64; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_DATE(void)      { return RAY_DATE; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TIME(void)      { return RAY_TIME; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TIMESTAMP(void) { return RAY_TIMESTAMP; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_GUID(void)      { return RAY_GUID; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_SYM(void)       { return RAY_SYM; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_STR(void)       { return RAY_STR; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TABLE(void)     { return RAY_TABLE; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_DICT(void)      { return RAY_DICT; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_LAMBDA(void)    { return RAY_LAMBDA; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_NULL(void)      { return RAY_NULL; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_ERR(void)       { return RAY_ERROR; }
 
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_LIST(nil_t) { return TYPE_LIST; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_B8(nil_t) { return TYPE_B8; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_U8(nil_t) { return TYPE_U8; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_I16(nil_t) { return TYPE_I16; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_I32(nil_t) { return TYPE_I32; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_I64(nil_t) { return TYPE_I64; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_SYMBOL(nil_t) { return TYPE_SYMBOL; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_DATE(nil_t) { return TYPE_DATE; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_TIME(nil_t) { return TYPE_TIME; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_TIMESTAMP(nil_t) { return TYPE_TIMESTAMP; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_F64(nil_t) { return TYPE_F64; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_GUID(nil_t) { return TYPE_GUID; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_C8(nil_t) { return TYPE_C8; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_TABLE(nil_t) { return TYPE_TABLE; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_DICT(nil_t) { return TYPE_DICT; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_LAMBDA(nil_t) { return TYPE_LAMBDA; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_NULL(nil_t) { return TYPE_NULL; }
-EMSCRIPTEN_KEEPALIVE i32_t TYPE_CODE_ERR(nil_t) { return TYPE_ERR; }
+/* ============================================================================
+ * Object introspection
+ * ============================================================================ */
 
-// ============================================================================
-// Object Introspection
-// ============================================================================
-
-// Get object type code
-EMSCRIPTEN_KEEPALIVE i32_t get_obj_type(obj_p obj) {
-  if (obj == NULL)
-    return TYPE_NULL;
-  return (i32_t)obj->type;
+EMSCRIPTEN_KEEPALIVE int32_t get_obj_type(ray_t* obj) {
+  if (!obj) return RAY_NULL;
+  return (int32_t)ray_type(obj);
 }
 
-// Get object length (for vectors/lists)
-EMSCRIPTEN_KEEPALIVE i64_t get_obj_len(obj_p obj) {
-  if (obj == NULL)
-    return 0;
-  if (IS_ATOM(obj))
-    return 1;
-  return obj->len;
+EMSCRIPTEN_KEEPALIVE int64_t get_obj_len(ray_t* obj) {
+  if (!obj) return 0;
+  if (ray_is_atom(obj)) return 1;
+  return ray_len(obj);
 }
 
-// Check if object is an atom (scalar)
-EMSCRIPTEN_KEEPALIVE b8_t is_obj_atom(obj_p obj) {
-  if (obj == NULL)
-    return B8_FALSE;
-  return IS_ATOM(obj) ? B8_TRUE : B8_FALSE;
+EMSCRIPTEN_KEEPALIVE bool is_obj_atom(ray_t* obj) {
+  return obj ? ray_is_atom(obj) : false;
 }
 
-// Check if object is a vector
-EMSCRIPTEN_KEEPALIVE b8_t is_obj_vector(obj_p obj) {
-  if (obj == NULL)
-    return B8_FALSE;
-  return IS_VECTOR(obj) ? B8_TRUE : B8_FALSE;
+EMSCRIPTEN_KEEPALIVE bool is_obj_vector(ray_t* obj) {
+  return obj ? ray_is_vec(obj) : false;
 }
 
-// Check if object is null
-EMSCRIPTEN_KEEPALIVE b8_t is_obj_null(obj_p obj) {
-  if (obj == NULL)
-    return B8_TRUE;
-  return is_null(obj);
+EMSCRIPTEN_KEEPALIVE bool is_obj_null(ray_t* obj) {
+  return !obj || RAY_IS_NULL(obj);
 }
 
-// Check if object is an error
-EMSCRIPTEN_KEEPALIVE b8_t is_obj_error(obj_p obj) {
-  if (obj == NULL)
-    return B8_FALSE;
-  return IS_ERR(obj) ? B8_TRUE : B8_FALSE;
+EMSCRIPTEN_KEEPALIVE bool is_obj_error(ray_t* obj) {
+  return obj && RAY_IS_ERR(obj);
 }
 
-// Get error info as a dict with structured error information
-// Returns a dict with keys like: code, message, expected, got, etc.
-EMSCRIPTEN_KEEPALIVE obj_p get_error_info(obj_p err) {
-  if (err == NULL || !IS_ERR(err))
-    return NULL_OBJ;
-  return err_info(err);
+EMSCRIPTEN_KEEPALIVE uint32_t get_obj_rc(ray_t* obj) {
+  return obj ? obj->rc : 0;
 }
 
-// Get error message as a simple string (doesn't allocate, returns pointer to static or inline data)
-EMSCRIPTEN_KEEPALIVE lit_p get_error_message(obj_p err) {
-  if (UNLIKELY(err == NULL || !IS_ERR(err))) {
-    return "Unknown error";
+/* ============================================================================
+ * Error info
+ *
+ * v2 splits the error object's *code* (inline 7-byte SSO sdata, retrieved via
+ * ray_err_code) from the error *message* (per-VM thread-local buffer, retrieved
+ * via ray_error_msg).  The message must be snapshotted before the next
+ * ray_error() call clobbers it — get_error_message returns a stable copy in
+ * g_err_msg_buf so the JS SDK can read it after subsequent eval calls.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE const char* get_error_code(ray_t* err) {
+  if (!err || !RAY_IS_ERR(err)) return "unknown";
+  const char* c = ray_err_code(err);
+  return c ? c : "unknown";
+}
+
+EMSCRIPTEN_KEEPALIVE const char* get_error_message(ray_t* err) {
+  (void)err;  /* message lives on the VM, not on the err object */
+  const char* m = ray_error_msg();
+  if (!m) m = "";
+  size_t n = strlen(m);
+  if (n >= sizeof(g_err_msg_buf)) n = sizeof(g_err_msg_buf) - 1;
+  memcpy(g_err_msg_buf, m, n);
+  g_err_msg_buf[n] = '\0';
+  return g_err_msg_buf;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* get_error_trace(void) {
+  return ray_get_error_trace();
+}
+
+/* Convenience: return a fresh dict {code, message} for JS. */
+EMSCRIPTEN_KEEPALIVE ray_t* get_error_info(ray_t* err) {
+  if (!err || !RAY_IS_ERR(err)) return RAY_NULL_OBJ;
+
+  const char* code = ray_err_code(err);
+  const char* msg  = ray_error_msg();
+  if (!code) code = "unknown";
+  if (!msg)  msg  = "";
+
+  int64_t code_id = ray_sym_intern("code", 4);
+  int64_t msg_id  = ray_sym_intern("message", 7);
+
+  ray_t* keys = ray_sym_vec_new(RAY_SYM_W64, 2);
+  keys = ray_vec_append(keys, &code_id);
+  keys = ray_vec_append(keys, &msg_id);
+
+  ray_t* vals = ray_list_new(2);
+  vals = ray_list_append(vals, ray_str(code, strlen(code)));
+  vals = ray_list_append(vals, ray_str(msg,  strlen(msg)));
+
+  return ray_dict_new(keys, vals);
+}
+
+/* ============================================================================
+ * Memory access for zero-copy ArrayBuffer views
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE void* get_data_ptr(ray_t* obj) {
+  if (!obj || ray_is_atom(obj)) return NULL;
+  return ray_data(obj);
+}
+
+/* Element size in bytes for a vector type tag.  Mirrors ray_type_sizes
+ * but special-cases RAY_LIST → sizeof(ray_t*) (which is 4 on WASM32, vs the
+ * engine's hardcoded 8 in ray_type_sizes for native 64-bit builds), and
+ * returns 0 for RAY_STR (per-cell ray_str_t structs aren't zero-copy
+ * viewable from JS — use str_vec_get instead). */
+EMSCRIPTEN_KEEPALIVE int32_t get_element_size(int8_t type) {
+  int8_t t = type < 0 ? -type : type;
+  if (t == RAY_LIST) return (int32_t)sizeof(ray_t*);
+  if (t == RAY_STR)  return 0;
+  return (int32_t)ray_type_sizes[(uint8_t)t];
+}
+
+EMSCRIPTEN_KEEPALIVE int64_t get_data_byte_size(ray_t* obj) {
+  if (!obj || ray_is_atom(obj)) return 0;
+  return ray_len(obj) * (int64_t)get_element_size(obj->type);
+}
+
+/* ============================================================================
+ * Atom constructors
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_b8(bool val)             { return ray_bool(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_u8(uint8_t val)          { return ray_u8(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_i16(int16_t val)         { return ray_i16(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_i32(int32_t val)         { return ray_i32(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_i64(int64_t val)         { return ray_i64(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_f32(float val)           { return ray_f32(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_f64(double val)          { return ray_f64(val); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_date(int64_t days)       { return ray_date(days); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_time(int64_t ms)         { return ray_time(ms); }
+EMSCRIPTEN_KEEPALIVE ray_t* init_timestamp(int64_t ns)    { return ray_timestamp(ns); }
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_symbol_str(const char* s, int64_t len) {
+  return ray_sym(ray_sym_intern(s, (size_t)len));
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_string_str(const char* s, int64_t len) {
+  return ray_str(s, (size_t)len);
+}
+
+/* ============================================================================
+ * Atom readers
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE bool     read_b8(ray_t* obj)        { return obj ? (bool)obj->b8 : false; }
+EMSCRIPTEN_KEEPALIVE uint8_t  read_u8(ray_t* obj)        { return obj ? obj->u8 : 0; }
+EMSCRIPTEN_KEEPALIVE int16_t  read_i16(ray_t* obj)       { return obj ? obj->i16 : 0; }
+EMSCRIPTEN_KEEPALIVE int32_t  read_i32(ray_t* obj)       { return obj ? obj->i32 : 0; }
+EMSCRIPTEN_KEEPALIVE int64_t  read_i64(ray_t* obj)       { return obj ? obj->i64 : 0; }
+EMSCRIPTEN_KEEPALIVE float    read_f32(ray_t* obj)       { return obj ? (float)obj->f64 : 0.0f; }
+EMSCRIPTEN_KEEPALIVE double   read_f64(ray_t* obj)       { return obj ? obj->f64 : 0.0; }
+
+/* DATE/TIME atoms store their value in the i64 union slot (vector elements
+ * are 4 bytes, but the atom storage union slot is i64).  Truncate to i32
+ * to match the v1 SDK contract — values fit comfortably in 31 bits. */
+EMSCRIPTEN_KEEPALIVE int32_t read_date(ray_t* obj) {
+  return obj ? (int32_t)obj->i64 : 0;
+}
+EMSCRIPTEN_KEEPALIVE int32_t read_time(ray_t* obj) {
+  return obj ? (int32_t)obj->i64 : 0;
+}
+EMSCRIPTEN_KEEPALIVE int64_t read_timestamp(ray_t* obj) {
+  return obj ? obj->i64 : 0;
+}
+EMSCRIPTEN_KEEPALIVE int64_t read_symbol_id(ray_t* obj) {
+  return obj ? obj->i64 : 0;
+}
+
+/* Reverse-lookup an interned symbol ID to its string.  Copies into a
+ * thread-local scratch buffer so the returned pointer survives until the
+ * next call (Emscripten's UTF8ToString already copies on the JS side
+ * before the next call lands). */
+EMSCRIPTEN_KEEPALIVE const char* symbol_to_str(int64_t id) {
+  ray_t* s = ray_sym_str(id);
+  if (!s) {
+    g_sym_to_str_buf[0] = '\0';
+    return g_sym_to_str_buf;
   }
-  
-  // For EC_USER errors, get the inline message
-  err_code_t code = err_code(err);
-  if (code == EC_USER) {
-    if (LIKELY(err->len > 0)) {
-      return (lit_p)(err + 1);  // Message stored after struct
+  size_t n = ray_str_len(s);
+  if (n >= sizeof(g_sym_to_str_buf)) n = sizeof(g_sym_to_str_buf) - 1;
+  memcpy(g_sym_to_str_buf, ray_str_ptr(s), n);
+  g_sym_to_str_buf[n] = '\0';
+  ray_release(s);
+  return g_sym_to_str_buf;
+}
+
+/* ============================================================================
+ * String helpers — RAY_STR atoms and RAY_STR vectors
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE const char* str_atom_ptr(ray_t* s) {
+  return s ? ray_str_ptr(s) : "";
+}
+
+EMSCRIPTEN_KEEPALIVE int64_t str_atom_len(ray_t* s) {
+  return s ? (int64_t)ray_str_len(s) : 0;
+}
+
+/* Per-cell read of a RAY_STR vector.  Copies into a thread-local scratch
+ * buffer; lifetime as for symbol_to_str. */
+EMSCRIPTEN_KEEPALIVE const char* str_vec_get(ray_t* vec, int64_t idx) {
+  if (!vec) {
+    g_str_vec_buf[0] = '\0';
+    return g_str_vec_buf;
+  }
+  size_t n = 0;
+  const char* p = ray_str_vec_get(vec, idx, &n);
+  if (!p) {
+    g_str_vec_buf[0] = '\0';
+    return g_str_vec_buf;
+  }
+  if (n >= sizeof(g_str_vec_buf)) n = sizeof(g_str_vec_buf) - 1;
+  memcpy(g_str_vec_buf, p, n);
+  g_str_vec_buf[n] = '\0';
+  return g_str_vec_buf;
+}
+
+/* ============================================================================
+ * Vector / list constructors
+ * ============================================================================ */
+
+/* v2's ray_vec_new returns a vector with capacity=N but len=0 — caller is
+ * expected to ray_vec_append.  The SDK's "create vector of length N" API
+ * relies on len being set up-front so the JS side can write through the
+ * typed-array view and have the engine see the elements.  We bridge that
+ * by setting v->len = capacity after allocation; data starts zero-filled
+ * because mmap'd pages are zero-init. */
+EMSCRIPTEN_KEEPALIVE ray_t* init_vector(int8_t type, int64_t len) {
+  ray_t* v = (type == RAY_SYM) ? ray_sym_vec_new(RAY_SYM_W64, len) : ray_vec_new(type, len);
+  if (v && !RAY_IS_ERR(v)) v->len = len;
+  return v;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_list(int64_t len) {
+  ray_t* l = ray_list_new(len);
+  if (l && !RAY_IS_ERR(l)) {
+    /* Slots default to RAY_NULL_OBJ so iteration / drop is safe before
+     * the SDK fills them in. */
+    ray_t** elems = (ray_t**)ray_data(l);
+    for (int64_t i = 0; i < len; i++) elems[i] = RAY_NULL_OBJ;
+    l->len = len;
+  }
+  return l;
+}
+
+/* ============================================================================
+ * Vector / list ops
+ *
+ * v2 vectors take raw element pointers (memcpy'd into the slot) while lists
+ * take ray_t* directly.  These helpers branch on the parent type so the JS
+ * SDK can stay uniform: every operation takes a "value" ray_t* (an atom)
+ * and we either unbox the scalar or hand the ray_t* through.
+ * ============================================================================ */
+
+/* Pull a void* to the storage slot of the relevant scalar inside `atom`,
+ * suitable for ray_vec_append/set/insert_at on a vector of `target_type`.
+ * Returns NULL for types that need a per-cell append helper instead. */
+static const void* scalar_addr(ray_t* atom, int8_t target_type) {
+  if (!atom) return NULL;
+  switch (target_type) {
+    case RAY_BOOL: case RAY_U8:        return &atom->u8;
+    case RAY_I16:                       return &atom->i16;
+    case RAY_I32:                       return &atom->i32;
+    case RAY_I64: case RAY_DATE:
+    case RAY_TIME: case RAY_TIMESTAMP:
+    case RAY_SYM:                       return &atom->i64;
+    case RAY_F32: {
+      static _Thread_local float f;     /* narrow once into a stable slot */
+      f = (float)atom->f64;
+      return &f;
     }
-    return "Out of memory";  // Fallback for OOM errors with no message
-  }
-  
-  // For other error types, return the error code name
-  return err_name(code);
-}
-
-// Get reference count
-EMSCRIPTEN_KEEPALIVE u32_t get_obj_rc(obj_p obj) {
-  if (obj == NULL)
-    return 0;
-  return rc_obj(obj);
-}
-
-// ============================================================================
-// Memory Access for Zero-Copy ArrayBuffer Views
-// ============================================================================
-
-// Get pointer to raw data (for TypedArray views)
-// Returns pointer to the start of the data array
-EMSCRIPTEN_KEEPALIVE raw_p get_data_ptr(obj_p obj) {
-  if (obj == NULL || IS_ATOM(obj))
-    return NULL;
-  return (raw_p)AS_C8(obj);
-}
-
-// Get byte size of element for a type
-EMSCRIPTEN_KEEPALIVE i32_t get_element_size(i8_t type) {
-  switch (type < 0 ? -type : type) {
-  case TYPE_B8:
-  case TYPE_U8:
-  case TYPE_C8:
-    return 1;
-  case TYPE_I16:
-    return 2;
-  case TYPE_I32:
-  case TYPE_DATE:
-  case TYPE_TIME:
-    return 4;
-  case TYPE_I64:
-  case TYPE_F64:
-  case TYPE_SYMBOL:
-  case TYPE_TIMESTAMP:
-    return 8;
-  case TYPE_GUID:
-    return 16;
-  case TYPE_LIST:
-    return sizeof(obj_p);
-  default:
-    return 0;
+    case RAY_F64:                       return &atom->f64;
+    case RAY_GUID:                      return ray_data(atom);
+    default:                            return NULL;
   }
 }
 
-// Get total byte size of object data
-EMSCRIPTEN_KEEPALIVE i64_t get_data_byte_size(obj_p obj) {
-  if (obj == NULL || IS_ATOM(obj))
-    return 0;
-  return obj->len * get_element_size(obj->type);
-}
-
-// ============================================================================
-// Scalar Constructors
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE obj_p init_b8(b8_t val) { return b8(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_u8(u8_t val) { return u8(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_c8(c8_t val) { return c8(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_i16(i16_t val) { return i16(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_i32(i32_t val) { return i32(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_i64(i64_t val) { return i64(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_f64(f64_t val) { return f64(val); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_date(i32_t days) { return adate(days); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_time(i32_t ms) { return atime(ms); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_timestamp(i64_t ns) { return timestamp(ns); }
-
-EMSCRIPTEN_KEEPALIVE obj_p init_symbol_str(lit_p str, i64_t len) {
-  return symbol(str, len);
-}
-
-EMSCRIPTEN_KEEPALIVE obj_p init_string_str(lit_p str, i64_t len) {
-  return string_from_str(str, len);
-}
-
-// ============================================================================
-// Scalar Readers
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE b8_t read_b8(obj_p obj) {
-  if (obj == NULL)
-    return B8_FALSE;
-  return obj->b8;
-}
-
-EMSCRIPTEN_KEEPALIVE u8_t read_u8(obj_p obj) {
-  if (obj == NULL)
-    return 0;
-  return obj->u8;
-}
-
-EMSCRIPTEN_KEEPALIVE c8_t read_c8(obj_p obj) {
-  if (obj == NULL)
-    return 0;
-  return obj->c8;
-}
-
-EMSCRIPTEN_KEEPALIVE i16_t read_i16(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I16;
-  return obj->i16;
-}
-
-EMSCRIPTEN_KEEPALIVE i32_t read_i32(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I32;
-  return obj->i32;
-}
-
-EMSCRIPTEN_KEEPALIVE i64_t read_i64(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I64;
-  return obj->i64;
-}
-
-EMSCRIPTEN_KEEPALIVE f64_t read_f64(obj_p obj) {
-  if (obj == NULL)
-    return NULL_F64;
-  return obj->f64;
-}
-
-EMSCRIPTEN_KEEPALIVE i32_t read_date(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I32;
-  return obj->i32;
-}
-
-EMSCRIPTEN_KEEPALIVE i32_t read_time(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I32;
-  return obj->i32;
-}
-
-EMSCRIPTEN_KEEPALIVE i64_t read_timestamp(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I64;
-  return obj->i64;
-}
-
-// Read symbol as interned ID
-EMSCRIPTEN_KEEPALIVE i64_t read_symbol_id(obj_p obj) {
-  if (obj == NULL)
-    return NULL_I64;
-  return obj->i64;
-}
-
-// Get symbol string from interned ID
-EMSCRIPTEN_KEEPALIVE str_p symbol_to_str(i64_t id) {
-  return str_from_symbol(id);
-}
-
-// ============================================================================
-// Vector Constructors
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE obj_p init_vector(i8_t type, i64_t len) {
-  return vector(type, len);
-}
-
-EMSCRIPTEN_KEEPALIVE obj_p init_list(i64_t len) { return LIST(len); }
-
-// ============================================================================
-// Vector Operations
-// ============================================================================
-
-// Get element at index (returns new object, caller must drop)
-EMSCRIPTEN_KEEPALIVE obj_p vec_at_idx(obj_p obj, i64_t idx) {
-  if (obj == NULL)
-    return NULL_OBJ;
-  return at_idx(obj, idx);
-}
-
-// Set element at index
-EMSCRIPTEN_KEEPALIVE obj_p vec_set_idx(obj_p *obj, i64_t idx, obj_p val) {
-  if (obj == NULL || *obj == NULL)
-    return NULL_OBJ;
-  return set_idx(obj, idx, val);
-}
-
-// Push element to end
-EMSCRIPTEN_KEEPALIVE obj_p vec_push(obj_p *obj, obj_p val) {
-  if (obj == NULL || *obj == NULL)
-    return NULL_OBJ;
-  return push_obj(obj, val);
-}
-
-// Insert element at index
-EMSCRIPTEN_KEEPALIVE obj_p vec_insert(obj_p *obj, i64_t idx, obj_p val) {
-  if (obj == NULL || *obj == NULL)
-    return NULL_OBJ;
-  return ins_obj(obj, idx, val);
-}
-
-// Resize vector
-EMSCRIPTEN_KEEPALIVE obj_p vec_resize(obj_p *obj, i64_t len) {
-  if (obj == NULL || *obj == NULL)
-    return NULL_OBJ;
-  return resize_obj(obj, len);
-}
-
-// ============================================================================
-// Vector Data Fill (for batch operations)
-// ============================================================================
-
-// Fill i64 vector from buffer
-EMSCRIPTEN_KEEPALIVE nil_t fill_i64_vec(obj_p obj, i64_t *data, i64_t len) {
-  if (obj == NULL || data == NULL || obj->type != TYPE_I64)
-    return;
-  i64_t copy_len = len < obj->len ? len : obj->len;
-  memcpy(AS_I64(obj), data, copy_len * sizeof(i64_t));
-}
-
-// Fill i32 vector from buffer
-EMSCRIPTEN_KEEPALIVE nil_t fill_i32_vec(obj_p obj, i32_t *data, i64_t len) {
-  if (obj == NULL || data == NULL || obj->type != TYPE_I32)
-    return;
-  i64_t copy_len = len < obj->len ? len : obj->len;
-  memcpy(AS_I32(obj), data, copy_len * sizeof(i32_t));
-}
-
-// Fill f64 vector from buffer
-EMSCRIPTEN_KEEPALIVE nil_t fill_f64_vec(obj_p obj, f64_t *data, i64_t len) {
-  if (obj == NULL || data == NULL || obj->type != TYPE_F64)
-    return;
-  i64_t copy_len = len < obj->len ? len : obj->len;
-  memcpy(AS_F64(obj), data, copy_len * sizeof(f64_t));
-}
-
-// ============================================================================
-// Dict Operations
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE obj_p init_dict(obj_p keys, obj_p vals) {
-  return dict(keys, vals);
-}
-
-// Get dict keys
-EMSCRIPTEN_KEEPALIVE obj_p dict_keys(obj_p d) {
-  if (d == NULL || d->type != TYPE_DICT)
-    return NULL_OBJ;
-  return clone_obj(AS_LIST(d)[0]);
-}
-
-// Get dict values
-EMSCRIPTEN_KEEPALIVE obj_p dict_vals(obj_p d) {
-  if (d == NULL || d->type != TYPE_DICT)
-    return NULL_OBJ;
-  return clone_obj(AS_LIST(d)[1]);
-}
-
-// Get value by key
-EMSCRIPTEN_KEEPALIVE obj_p dict_get(obj_p d, obj_p key) {
-  if (d == NULL || d->type != TYPE_DICT)
-    return NULL_OBJ;
-  return at_obj(d, key);
-}
-
-// ============================================================================
-// Table Operations
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE obj_p init_table(obj_p cols, obj_p vals) {
-  return table(cols, vals);
-}
-
-// Get table column names (symbol vector)
-EMSCRIPTEN_KEEPALIVE obj_p table_keys(obj_p t) {
-  if (t == NULL || t->type != TYPE_TABLE)
-    return NULL_OBJ;
-  return clone_obj(AS_LIST(t)[0]);
-}
-
-// Get table values (list of vectors)
-EMSCRIPTEN_KEEPALIVE obj_p table_vals(obj_p t) {
-  if (t == NULL || t->type != TYPE_TABLE)
-    return NULL_OBJ;
-  return clone_obj(AS_LIST(t)[1]);
-}
-
-// Get column by name
-EMSCRIPTEN_KEEPALIVE obj_p table_col(obj_p t, lit_p col_name, i64_t len) {
-  if (t == NULL || t->type != TYPE_TABLE)
-    return NULL_OBJ;
-  obj_p sym = symbol(col_name, len);
-  obj_p result = at_obj(t, sym);
-  drop_obj(sym);
-  return result;
-}
-
-// Get row by index
-EMSCRIPTEN_KEEPALIVE obj_p table_row(obj_p t, i64_t idx) {
-  if (t == NULL || t->type != TYPE_TABLE)
-    return NULL_OBJ;
-  return at_idx(t, idx);
-}
-
-// Get table row count
-EMSCRIPTEN_KEEPALIVE i64_t table_count(obj_p t) {
-  if (t == NULL || t->type != TYPE_TABLE)
-    return 0;
-  obj_p vals = AS_LIST(t)[1];
-  if (vals == NULL || vals->len == 0)
-    return 0;
-  obj_p first_col = AS_LIST(vals)[0];
-  return first_col ? first_col->len : 0;
-}
-
-// ============================================================================
-// Query Operations
-// ============================================================================
-
-// Execute select query (takes dict as query)
-EMSCRIPTEN_KEEPALIVE obj_p query_select(obj_p query) {
-  if (query == NULL)
-    return NULL_OBJ;
-  return ray_select(query);
-}
-
-// Execute update query
-EMSCRIPTEN_KEEPALIVE obj_p query_update(obj_p query) {
-  if (query == NULL)
-    return NULL_OBJ;
-  return ray_update(query);
-}
-
-// Insert into table
-// Arguments: t = table, data = data to insert
-EMSCRIPTEN_KEEPALIVE obj_p table_insert(obj_p t, obj_p data) {
-  if (t == NULL || data == NULL)
-    return NULL_OBJ;
-  obj_p args[2] = {t, data};
-  return ray_insert(args, 2);
-}
-
-// Upsert into table
-// Arguments: t = table, match_count = number of key columns, data = data
-EMSCRIPTEN_KEEPALIVE obj_p table_upsert(obj_p t, obj_p match_count,
-                                        obj_p data) {
-  if (t == NULL || data == NULL)
-    return NULL_OBJ;
-  obj_p args[3] = {t, match_count, data};
-  return ray_upsert(args, 3);
-}
-
-// ============================================================================
-// Symbol Interning
-// ============================================================================
-
-// Intern a string as symbol and return ID
-EMSCRIPTEN_KEEPALIVE i64_t intern_symbol(lit_p str, i64_t len) {
-  obj_p sym = symbol(str, len);
-  i64_t id = sym->i64;
-  drop_obj(sym);
-  return id;
-}
-
-// ============================================================================
-// Binary Set/Get (global variable assignment)
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE obj_p global_set(obj_p name, obj_p val) {
-  if (name == NULL)
-    return NULL_OBJ;
-  return binary_set(name, val);
-}
-
-// Quote object (wrap in reference)
-EMSCRIPTEN_KEEPALIVE obj_p quote_obj(obj_p obj) {
-  if (obj == NULL)
-    return NULL_OBJ;
-  return ray_quote(obj);
-}
-
-// ============================================================================
-// Serialization
-// ============================================================================
-
-// Serialize object to bytes
-EMSCRIPTEN_KEEPALIVE obj_p serialize(obj_p obj) {
-  if (obj == NULL)
-    return NULL_OBJ;
-  return ser_obj(obj);
-}
-
-// Deserialize bytes to object
-EMSCRIPTEN_KEEPALIVE obj_p deserialize(obj_p buf) {
-  if (buf == NULL)
-    return NULL_OBJ;
-  return de_obj(buf);
-}
-
-// ============================================================================
-// Type Name
-// ============================================================================
-
-EMSCRIPTEN_KEEPALIVE str_p get_type_name(i8_t type) { return type_name(type); }
-
-// ============================================================================
-// CSV Parsing
-// ============================================================================
-
-// Read CSV from string content
-// - Assumes types are all strings (C8) for simplicity in WASM
-// - Infers column names from first line
-EMSCRIPTEN_KEEPALIVE obj_p read_csv(lit_p content, i64_t len) {
-  i64_t i, l, lines;
-  str_p buf, pos, line, prev;
-  obj_p names, cols, res;
-  c8_t sep = ',';
-
-  if (content == NULL) {
-    printf("ERROR: read_csv content is NULL\n");
-    return err_user("CSV content is NULL");
+/* Box a vector element (raw pointer) back into a fresh atom. */
+static ray_t* box_vec_element(int8_t vec_type, const void* p) {
+  if (!p) return RAY_NULL_OBJ;
+  switch (vec_type) {
+    case RAY_BOOL:      return ray_bool(*(const uint8_t*)p);
+    case RAY_U8:        return ray_u8(*(const uint8_t*)p);
+    case RAY_I16:       return ray_i16(*(const int16_t*)p);
+    case RAY_I32:       return ray_i32(*(const int32_t*)p);
+    case RAY_I64:       return ray_i64(*(const int64_t*)p);
+    case RAY_F32:       return ray_f32(*(const float*)p);
+    case RAY_F64:       return ray_f64(*(const double*)p);
+    case RAY_DATE:      return ray_date(*(const int32_t*)p);
+    case RAY_TIME:      return ray_time(*(const int32_t*)p);
+    case RAY_TIMESTAMP: return ray_timestamp(*(const int64_t*)p);
+    case RAY_SYM:       return ray_sym(*(const int64_t*)p);
+    case RAY_GUID:      return ray_guid((const uint8_t*)p);
+    default:            return RAY_NULL_OBJ;
   }
-
-  // We receive a heap pointer and byte length from JS.
-  // Trust the length passed in.
-  if (len <= 0) {
-    printf("ERROR: read_csv len <= 0\n");
-    return err_user("CSV length is zero or negative");
-  }
-
-  printf("INFO: read_csv starting, len=%lld bytes (%.1f MB)\n", len, len / (1024.0 * 1024.0));
-
-  // Since we receive a JS string pointer, we shouldn't modify it.
-  // However, parse_csv_lines expects a buffer it can read.
-  // We treat 'content' as the buffer.
-  buf = (str_p)content;
-
-  // Count lines
-  lines = 0;
-  pos = buf;
-  while ((pos = (str_p)memchr(pos, '\n', buf + len - pos))) {
-    ++lines;
-    ++pos;
-  }
-
-  if (len > 0 && buf[len - 1] != '\n') {
-    ++lines;
-  }
-
-  if (lines == 0) {
-    printf("ERROR: read_csv no lines found\n");
-    return err_user("CSV has no lines");
-  }
-
-  printf("INFO: read_csv found %lld lines\n", lines);
-
-  // Parse header
-  pos = (str_p)memchr(buf, '\n', len);
-  i64_t header_len = (pos == NULL) ? len : (pos - buf);
-  line = (pos == NULL) ? NULL : (pos + 1);
-
-  // Count columns based on separator
-  l = 1;
-  pos = buf;
-  while ((pos = (str_p)memchr(pos, sep, header_len - (pos - buf)))) {
-    ++l;
-    ++pos;
-  }
-
-  printf("INFO: read_csv found %lld columns\n", l);
-
-  names = SYMBOL(l);
-  if (names == NULL) {
-    printf("ERROR: read_csv failed to allocate names vector\n");
-    return err_user("Failed to allocate column names");
-  }
-
-  pos = buf;
-  i64_t remaining = header_len;
-
-  for (i = 0; i < l; i++) {
-    prev = pos;
-    str_p next_sep = (str_p)memchr(pos, sep, remaining);
-
-    if (next_sep == NULL) {
-      // Last column
-      if (remaining > 0 && prev[remaining - 1] == '\r') {
-        AS_SYMBOL(names)
-        [i] = io_symbol_from_str_trimmed(prev, remaining - 1);
-      } else {
-        AS_SYMBOL(names)[i] = io_symbol_from_str_trimmed(prev, remaining);
-      }
-      pos += remaining;
-      remaining = 0;
-    } else {
-      AS_SYMBOL(names)
-      [i] = io_symbol_from_str_trimmed(prev, next_sep - prev);
-      remaining -= (next_sep - prev + 1);
-      pos = next_sep + 1;
-    }
-  }
-
-  // Alloc types - default to C8 (String)
-  i8_t *type_arr = (i8_t *)malloc(l * sizeof(i8_t));
-  if (type_arr == NULL) {
-    printf("ERROR: read_csv failed to allocate type_arr\n");
-    drop_obj(names);
-    return err_user("Failed to allocate type array");
-  }
-  for (i = 0; i < l; i++) {
-    type_arr[i] = TYPE_C8;
-  }
-
-  // Exclude header from data lines
-  lines--;
-  if (lines < 0)
-    lines = 0;
-
-  printf("INFO: read_csv allocating %lld columns x %lld rows\n", l, lines);
-
-  // Allocate columns
-  cols = LIST(l);
-  if (cols == NULL) {
-    printf("ERROR: read_csv failed to allocate cols list\n");
-    free(type_arr);
-    drop_obj(names);
-    return err_user("Failed to allocate columns list");
-  }
-
-  for (i = 0; i < l; i++) {
-    AS_LIST(cols)[i] = LIST(lines);
-    if (AS_LIST(cols)[i] == NULL) {
-      printf("ERROR: read_csv failed to allocate column %lld (lines=%lld)\n", i, lines);
-      free(type_arr);
-      drop_obj(names);
-      drop_obj(cols);
-      return err_user("Failed to allocate column data - file too large for memory");
-    }
-  }
-
-  printf("INFO: read_csv column allocation successful, parsing data...\n");
-
-  // parse lines
-  // If line is NULL (only header), we skip parsing
-  if (lines > 0 && line != NULL) {
-    printf("INFO: read_csv calling io_read_csv for %lld lines...\n", lines);
-    i64_t data_size = len - (line - buf);
-    i64_t *line_offsets = NULL;
-    i64_t indexed_lines = io_build_line_index(line, data_size, &line_offsets);
-    res = io_read_csv(type_arr, l, line, data_size, indexed_lines, line_offsets, cols, sep);
-    free(line_offsets);
-    printf("INFO: read_csv io_read_csv returned: %p, type=%d\n", res, res ? res->type : -999);
-
-    if (res && res->type == TYPE_ERR) {
-      printf("ERROR: read_csv io_read_csv returned error\n");
-      free(type_arr);
-      drop_obj(names);
-      drop_obj(cols);
-      return res;
-    }
-  }
-
-  free(type_arr);
-  
-  // Verify objects are still valid before creating table
-  printf("INFO: read_csv verifying objects - names=%p type=%d len=%lld, cols=%p type=%d len=%lld\n", 
-         names, names ? names->type : -1, names ? names->len : -1,
-         cols, cols ? cols->type : -1, cols ? cols->len : -1);
-  
-  if (names == NULL || cols == NULL) {
-    printf("ERROR: read_csv names or cols became NULL!\n");
-    if (names) drop_obj(names);
-    if (cols) drop_obj(cols);
-    return err_user("Memory corruption - names or cols became NULL");
-  }
-  
-  printf("INFO: read_csv creating table...\n");
-  obj_p t = table(names, cols);
-  printf("INFO: read_csv table() returned: %p\n", t);
-  if (t == NULL) {
-    printf("ERROR: read_csv table() returned NULL - out of memory!\n");
-    drop_obj(names);
-    drop_obj(cols);
-    return err_user("Out of memory: failed to allocate table structure");
-  }
-
-  printf("INFO: read_csv success. Table: %p, rows=%lld, cols=%lld\n", t, lines, l);
-  return t;
 }
 
-// ============================================================================
-// Main Entry Point
-// ============================================================================
+EMSCRIPTEN_KEEPALIVE ray_t* vec_at_idx(ray_t* obj, int64_t idx) {
+  if (!obj) return RAY_NULL_OBJ;
+  int8_t t = ray_type(obj);
+  if (t == RAY_LIST) {
+    ray_t* item = ray_list_get(obj, idx);
+    if (item) ray_retain(item);
+    return item ? item : RAY_NULL_OBJ;
+  }
+  if (t == RAY_STR) {
+    size_t n = 0;
+    const char* p = ray_str_vec_get(obj, idx, &n);
+    return p ? ray_str(p, n) : RAY_NULL_OBJ;
+  }
+  void* p = ray_vec_get(obj, idx);
+  return box_vec_element(t, p);
+}
 
-EMSCRIPTEN_KEEPALIVE i32_t main(i32_t argc, str_p argv[]) {
-  sys_info_t info;
-  obj_p fmt = NULL_OBJ;
-  runtime_p runtime;
+EMSCRIPTEN_KEEPALIVE ray_t* vec_set_idx(ray_t* obj, int64_t idx, ray_t* val) {
+  if (!obj || !val) return RAY_NULL_OBJ;
+  int8_t t = ray_type(obj);
+  if (t == RAY_LIST) {
+    ray_retain(val);
+    return ray_list_set(obj, idx, val);
+  }
+  if (t == RAY_STR) {
+    size_t n = ray_str_len(val);
+    return ray_str_vec_set(obj, idx, ray_str_ptr(val), n);
+  }
+  const void* sp = scalar_addr(val, t);
+  if (!sp) return ray_error("type", "vec_set_idx: unsupported element type");
+  return ray_vec_set(obj, idx, sp);
+}
 
-  // Silence unused parameter warnings
+EMSCRIPTEN_KEEPALIVE ray_t* vec_push(ray_t* obj, ray_t* val) {
+  if (!obj || !val) return RAY_NULL_OBJ;
+  int8_t t = ray_type(obj);
+  if (t == RAY_LIST) {
+    ray_retain(val);
+    return ray_list_append(obj, val);
+  }
+  if (t == RAY_STR) {
+    size_t n = ray_str_len(val);
+    return ray_str_vec_append(obj, ray_str_ptr(val), n);
+  }
+  const void* sp = scalar_addr(val, t);
+  if (!sp) return ray_error("type", "vec_push: unsupported element type");
+  return ray_vec_append(obj, sp);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* vec_insert(ray_t* obj, int64_t idx, ray_t* val) {
+  if (!obj || !val) return RAY_NULL_OBJ;
+  int8_t t = ray_type(obj);
+  if (t == RAY_LIST) {
+    ray_retain(val);
+    return ray_list_insert_at(obj, idx, val);
+  }
+  if (t == RAY_STR) {
+    size_t n = ray_str_len(val);
+    return ray_str_vec_insert_at(obj, idx, ray_str_ptr(val), n);
+  }
+  const void* sp = scalar_addr(val, t);
+  if (!sp) return ray_error("type", "vec_insert: unsupported element type");
+  return ray_vec_insert_at(obj, idx, sp);
+}
+
+/* ============================================================================
+ * Vector batch fill
+ *
+ * Caller-must-own contract: writes through ray_data() honor slice offsets
+ * but bypass COW.  If obj->rc > 1 we'd silently mutate other holders, so
+ * the JS wrappers must build vectors fresh before filling.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE void fill_i64_vec(ray_t* obj, int64_t* data, int64_t len) {
+  if (!obj || !data || obj->type != RAY_I64) return;
+  int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
+  memcpy(ray_data(obj), data, copy_len * sizeof(int64_t));
+}
+
+EMSCRIPTEN_KEEPALIVE void fill_i32_vec(ray_t* obj, int32_t* data, int64_t len) {
+  if (!obj || !data || obj->type != RAY_I32) return;
+  int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
+  memcpy(ray_data(obj), data, copy_len * sizeof(int32_t));
+}
+
+EMSCRIPTEN_KEEPALIVE void fill_f64_vec(ray_t* obj, double* data, int64_t len) {
+  if (!obj || !data || obj->type != RAY_F64) return;
+  int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
+  memcpy(ray_data(obj), data, copy_len * sizeof(double));
+}
+
+/* ============================================================================
+ * Dict
+ *
+ * ray_dict_new consumes both refs.  JS wrappers retain their own handles to
+ * keys/vals, so we ray_retain before the call to keep both lifetimes intact.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_dict(ray_t* keys, ray_t* vals) {
+  if (!keys || !vals) return RAY_NULL_OBJ;
+  ray_retain(keys);
+  ray_retain(vals);
+  return ray_dict_new(keys, vals);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* dict_keys(ray_t* d) {
+  if (!d || ray_type(d) != RAY_DICT) return RAY_NULL_OBJ;
+  ray_t* k = ray_dict_keys(d);  /* borrowed */
+  if (k) ray_retain(k);
+  return k ? k : RAY_NULL_OBJ;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* dict_vals(ray_t* d) {
+  if (!d || ray_type(d) != RAY_DICT) return RAY_NULL_OBJ;
+  ray_t* v = ray_dict_vals(d);  /* borrowed */
+  if (v) ray_retain(v);
+  return v ? v : RAY_NULL_OBJ;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* dict_get(ray_t* d, ray_t* key) {
+  if (!d || ray_type(d) != RAY_DICT || !key) return RAY_NULL_OBJ;
+  ray_t* v = ray_dict_get(d, key);
+  return v ? v : RAY_NULL_OBJ;
+}
+
+/* ============================================================================
+ * Table
+ *
+ * v2 builds tables column-by-column; init_table replays the v1 contract by
+ * iterating the JS-supplied (sym-vec, list-of-cols) and chaining add_col.
+ * Each col is retained once because ray_table_add_col → ray_list_append
+ * consumes the ref.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE ray_t* init_table(ray_t* keys, ray_t* vals) {
+  if (!keys || !vals) return RAY_NULL_OBJ;
+  if (ray_type(keys) != RAY_SYM || ray_type(vals) != RAY_LIST)
+    return ray_error("type", "init_table: expected (RAY_SYM, RAY_LIST)");
+  int64_t n = ray_len(keys);
+  if (ray_len(vals) != n)
+    return ray_error("length", "init_table: keys/vals length mismatch");
+
+  ray_t* tbl = ray_table_new(n);
+  if (RAY_IS_ERR(tbl)) return tbl;
+
+  int64_t* key_ids = (int64_t*)ray_data(keys);
+  for (int64_t i = 0; i < n; i++) {
+    ray_t* col = ray_list_get(vals, i);
+    if (!col) continue;
+    ray_retain(col);
+    tbl = ray_table_add_col(tbl, key_ids[i], col);
+    if (RAY_IS_ERR(tbl)) return tbl;
+  }
+  return tbl;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* table_keys(ray_t* t) {
+  if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
+  int64_t n = ray_table_ncols(t);
+  ray_t* keys = ray_sym_vec_new(RAY_SYM_W64, n);
+  for (int64_t i = 0; i < n; i++) {
+    int64_t id = ray_table_col_name(t, i);
+    keys = ray_vec_append(keys, &id);
+  }
+  return keys;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* table_vals(ray_t* t) {
+  if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
+  int64_t n = ray_table_ncols(t);
+  ray_t* lst = ray_list_new(n);
+  for (int64_t i = 0; i < n; i++) {
+    ray_t* col = ray_table_get_col_idx(t, i);  /* borrowed */
+    if (col) ray_retain(col);
+    lst = ray_list_append(lst, col ? col : RAY_NULL_OBJ);
+  }
+  return lst;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* table_col(ray_t* t, const char* name, int64_t len) {
+  if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
+  int64_t id = ray_sym_intern(name, (size_t)len);
+  ray_t* col = ray_table_get_col(t, id);  /* borrowed */
+  if (col) ray_retain(col);
+  return col ? col : RAY_NULL_OBJ;
+}
+
+/* Build a {col_name: col[idx]} dict for one row. */
+EMSCRIPTEN_KEEPALIVE ray_t* table_row(ray_t* t, int64_t idx) {
+  if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
+  int64_t n = ray_table_ncols(t);
+  ray_t* keys = ray_sym_vec_new(RAY_SYM_W64, n);
+  ray_t* vals = ray_list_new(n);
+  for (int64_t i = 0; i < n; i++) {
+    int64_t id = ray_table_col_name(t, i);
+    keys = ray_vec_append(keys, &id);
+    ray_t* col = ray_table_get_col_idx(t, i);
+    ray_t* cell = col ? vec_at_idx(col, idx) : RAY_NULL_OBJ;
+    vals = ray_list_append(vals, cell);
+  }
+  return ray_dict_new(keys, vals);
+}
+
+EMSCRIPTEN_KEEPALIVE int64_t table_count(ray_t* t) {
+  if (!t || ray_type(t) != RAY_TABLE) return 0;
+  return ray_table_nrows(t);
+}
+
+/* ============================================================================
+ * Query operations
+ *
+ * v2 exposes the special-form bodies as ray_*_fn(args, n).  ray_insert_fn
+ * short-circuits when args[0]->type == RAY_TABLE so live tables work without
+ * being re-evaluated.  See src/ops/query.c.
+ *
+ * NOTE: ray_select_fn / ray_update_fn evaluate `from:` as an AST node, so
+ * the JS-side SelectQuery class must render to a Rayfall string and call
+ * eval_cmd instead of building a dict that stuffs a raw pointer into `from`.
+ * That work happens in the JS SDK, not here.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE ray_t* query_select(ray_t* query) {
+  if (!query) return RAY_NULL_OBJ;
+  return ray_select_fn(&query, 1);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* query_update(ray_t* query) {
+  if (!query) return RAY_NULL_OBJ;
+  return ray_update_fn(&query, 1);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* table_insert(ray_t* t, ray_t* data) {
+  if (!t || !data) return RAY_NULL_OBJ;
+  ray_t* args[2] = { t, data };
+  return ray_insert_fn(args, 2);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* table_upsert(ray_t* t, ray_t* match_count, ray_t* data) {
+  if (!t || !data) return RAY_NULL_OBJ;
+  ray_t* args[3] = { t, match_count, data };
+  return ray_upsert_fn(args, 3);
+}
+
+/* ============================================================================
+ * Symbol / global env / type name
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE int64_t intern_symbol(const char* s, int64_t len) {
+  return ray_sym_intern(s, (size_t)len);
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* global_set(ray_t* name, ray_t* val) {
+  if (!name) return RAY_NULL_OBJ;
+  ray_err_t e = ray_env_set(name->i64, val);
+  if (e != RAY_OK) return ray_error(ray_err_code_str(e), NULL);
+  return val;
+}
+
+EMSCRIPTEN_KEEPALIVE const char* get_type_name(int8_t type) {
+  return ray_type_name(type);
+}
+
+/* ============================================================================
+ * CSV
+ *
+ * v2 dropped the buffer-based reader.  ray_read_csv is file-only (mmap +
+ * MAP_POPULATE).  The JS SDK writes the supplied buffer to Emscripten MEMFS
+ * at /tmp/<name>.csv, calls read_csv(path), then unlinks.
+ * ============================================================================ */
+
+EMSCRIPTEN_KEEPALIVE ray_t* read_csv(const char* path) {
+  if (!path) return ray_error("user", "CSV path is NULL");
+  return ray_read_csv(path);
+}
+
+/* ============================================================================
+ * Main entry point
+ * ============================================================================ */
+
+static void shutdown_runtime(void) {
+  if (g_runtime) {
+    ray_runtime_destroy(g_runtime);
+    g_runtime = NULL;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
-  // Initialize runtime like Python binding does:
-  // Pass -r 0 to disable REPL (we'll call eval_str directly from JS)
-  // Pass -p 1 to force single-threaded mode (avoids pool crashes in WASM)
-  str_p wasm_argv[] = {"rayforce-wasm", "-r", "0", "-p", "1", NULL};
-  atexit((void (*)(void))runtime_destroy);
-  runtime = runtime_create(5, wasm_argv);
-
-  if (runtime == NULL) {
-    printf("Failed to initialize Rayforce runtime\n");
+  g_runtime = ray_runtime_create(0, NULL);
+  if (!g_runtime) {
+    fprintf(stderr, "WASM init: ray_runtime_create failed\n");
     return -1;
   }
+  atexit(shutdown_runtime);
 
-  // Verify eval_str works after runtime initialization (LISP syntax)
+  /* Smoke test — confirms eval + format link cleanly. */
   {
-    obj_p test_result = eval_str("(+ 1 2)");
-    if (test_result == NULL) {
-      printf("WASM init error: eval_str returned NULL\n");
+    ray_t* r = ray_eval_str("(+ 1 2)");
+    if (!r) {
+      fprintf(stderr, "WASM init: eval_str returned NULL\n");
+    } else if (RAY_IS_ERR(r)) {
+      fprintf(stderr, "WASM init: smoke-test eval errored: %s\n",
+              ray_error_msg());
+      ray_error_free(r);
     } else {
-      obj_p fmt_result = obj_fmt(test_result, B8_TRUE);
-      printf("WASM init OK: (+ 1 2) = %.*s\n", (int)fmt_result->len,
-             AS_C8(fmt_result));
-      drop_obj(fmt_result);
-      drop_obj(test_result);
+      ray_t* fmt = ray_fmt(r, 1);
+      if (fmt && !RAY_IS_ERR(fmt)) {
+        printf("WASM init OK: (+ 1 2) = %.*s\n",
+               (int)ray_str_len(fmt), ray_str_ptr(fmt));
+        ray_release(fmt);
+      }
+      ray_release(r);
     }
   }
 
-  // Get system info after runtime is initialized
-  info = sys_info(1);
+  /* Build the boot banner. */
+  char banner[512];
+  snprintf(banner, sizeof(banner), ABOUT_BANNER, BOLD, YELLOW,
+           ray_version_string(), RESET);
 
-  str_fmt_into(&fmt, -1, __ABOUT, BOLD, YELLOW, info.major_version,
-               info.minor_version, info.build_date, info.cwd, RESET);
-
-  list_examples(&fmt);
-
-  // Signal to JS that we're ready
-  js_rayforce_ready(AS_C8(fmt));
-  drop_obj(fmt);
-
-  // Don't call runtime_run() - that would start a blocking event loop
-  // JS will call eval_str directly
+  js_rayforce_ready(banner);
   return 0;
 }

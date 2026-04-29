@@ -25,6 +25,9 @@ export function createRayforceSDK(wasmModule) {
 // Type Constants
 // ============================================================================
 
+// v2 type codes: RAY_F32 was inserted at slot 6, shifting F64 from 10→7,
+// DATE 7→8, TIME 8→9, TIMESTAMP 9→10, GUID stays 11.  RAY_SYM is now 12
+// (the v1 C8 slot) and RAY_STR is a new variable-length string column at 13.
 export const Types = Object.freeze({
   LIST: 0,
   B8: 1,
@@ -32,50 +35,55 @@ export const Types = Object.freeze({
   I16: 3,
   I32: 4,
   I64: 5,
-  SYMBOL: 6,
-  DATE: 7,
-  TIME: 8,
-  TIMESTAMP: 9,
-  F64: 10,
+  F32: 6,
+  F64: 7,
+  DATE: 8,
+  TIME: 9,
+  TIMESTAMP: 10,
   GUID: 11,
-  C8: 12,
+  SYM: 12,
+  STR: 13,
   TABLE: 98,
   DICT: 99,
   LAMBDA: 100,
   NULL: 126,
   ERR: 127,
+  // Deprecated aliases for one release; emit warnings if you read these.
+  SYMBOL: 12,
+  C8: 12,
 });
 
-// Element sizes for each type (in bytes)
+// Element sizes for each type (in bytes).  STR has no entry — RAY_STR
+// vectors use per-cell ray_str_t structs that JS reads via _strVecGet.
 const ELEMENT_SIZES = {
   [Types.B8]: 1,
   [Types.U8]: 1,
-  [Types.C8]: 1,
   [Types.I16]: 2,
   [Types.I32]: 4,
   [Types.I64]: 8,
+  [Types.F32]: 4,
   [Types.F64]: 8,
   [Types.DATE]: 4,
   [Types.TIME]: 4,
   [Types.TIMESTAMP]: 8,
-  [Types.SYMBOL]: 8,
+  [Types.SYM]: 8,
   [Types.GUID]: 16,
   [Types.LIST]: 4, // pointer size in WASM32
 };
 
-// TypedArray constructors for each type
+// TypedArray constructors for each type.  STR/LIST aren't typed-array-viewable.
 const TYPED_ARRAY_MAP = {
   [Types.B8]: Int8Array,
   [Types.U8]: Uint8Array,
-  [Types.C8]: Uint8Array,
   [Types.I16]: Int16Array,
   [Types.I32]: Int32Array,
   [Types.I64]: BigInt64Array,
+  [Types.F32]: Float32Array,
   [Types.F64]: Float64Array,
   [Types.DATE]: Int32Array,
   [Types.TIME]: Int32Array,
   [Types.TIMESTAMP]: BigInt64Array,
-  [Types.SYMBOL]: BigInt64Array,
+  [Types.SYM]: BigInt64Array,
 };
 
 // ============================================================================
@@ -91,93 +99,103 @@ class RayforceSDK {
 
   _setupBindings() {
     const w = this._wasm;
-    
-    // Core functions
-    this._evalCmd = w.cwrap('eval_cmd', 'number', ['string', 'string']);
-    this._evalStr = w.cwrap('eval_str', 'number', ['string']);
-    this._strOfObj = w.cwrap('strof_obj', 'string', ['number']);
-    this._dropObj = w.cwrap('drop_obj', null, ['number']);
-    this._cloneObj = w.cwrap('clone_obj', 'number', ['number']);
-    this._versionStr = w.cwrap('version_str', 'string', []);
-    
+
+    // Core
+    this._evalCmd        = w.cwrap('eval_cmd',         'number', ['string', 'string']);
+    this._strOfObj       = w.cwrap('strof_obj',        'string', ['number']);
+    this._versionStr     = w.cwrap('version_str',      'string', []);
+
+    // Memory: ray_release / ray_retain are exported directly from the engine.
+    this._release        = w.cwrap('ray_release',      null,     ['number']);
+    this._retain         = w.cwrap('ray_retain',       null,     ['number']);
+
     // Type introspection
-    this._getObjType = w.cwrap('get_obj_type', 'number', ['number']);
-    this._getObjLen = w.cwrap('get_obj_len', 'number', ['number']);
-    this._isObjAtom = w.cwrap('is_obj_atom', 'number', ['number']);
-    this._isObjVector = w.cwrap('is_obj_vector', 'number', ['number']);
-    this._isObjNull = w.cwrap('is_obj_null', 'number', ['number']);
-    this._isObjError = w.cwrap('is_obj_error', 'number', ['number']);
-    this._getObjRc = w.cwrap('get_obj_rc', 'number', ['number']);
-    
-    // Memory access
-    this._getDataPtr = w.cwrap('get_data_ptr', 'number', ['number']);
-    this._getElementSize = w.cwrap('get_element_size', 'number', ['number']);
-    this._getDataByteSize = w.cwrap('get_data_byte_size', 'number', ['number']);
-    
-    // Scalar constructors
-    this._initB8 = w.cwrap('init_b8', 'number', ['number']);
-    this._initU8 = w.cwrap('init_u8', 'number', ['number']);
-    this._initC8 = w.cwrap('init_c8', 'number', ['number']);
-    this._initI16 = w.cwrap('init_i16', 'number', ['number']);
-    this._initI32 = w.cwrap('init_i32', 'number', ['number']);
-    this._initI64 = w.cwrap('init_i64', 'number', ['number']);
-    this._initF64 = w.cwrap('init_f64', 'number', ['number']);
-    this._initDate = w.cwrap('init_date', 'number', ['number']);
-    this._initTime = w.cwrap('init_time', 'number', ['number']);
-    this._initTimestamp = w.cwrap('init_timestamp', 'number', ['number']);
-    this._initSymbolStr = w.cwrap('init_symbol_str', 'number', ['string', 'number']);
-    this._initStringStr = w.cwrap('init_string_str', 'number', ['string', 'number']);
-    
-    // Scalar readers
-    this._readB8 = w.cwrap('read_b8', 'number', ['number']);
-    this._readU8 = w.cwrap('read_u8', 'number', ['number']);
-    this._readC8 = w.cwrap('read_c8', 'number', ['number']);
-    this._readI16 = w.cwrap('read_i16', 'number', ['number']);
-    this._readI32 = w.cwrap('read_i32', 'number', ['number']);
-    this._readI64 = w.cwrap('read_i64', 'number', ['number']);
-    this._readF64 = w.cwrap('read_f64', 'number', ['number']);
-    this._readDate = w.cwrap('read_date', 'number', ['number']);
-    this._readTime = w.cwrap('read_time', 'number', ['number']);
-    this._readTimestamp = w.cwrap('read_timestamp', 'number', ['number']);
-    this._readSymbolId = w.cwrap('read_symbol_id', 'number', ['number']);
-    this._symbolToStr = w.cwrap('symbol_to_str', 'string', ['number']);
-    
-    // Vector operations
-    this._initVector = w.cwrap('init_vector', 'number', ['number', 'number']);
-    this._initList = w.cwrap('init_list', 'number', ['number']);
-    this._vecAtIdx = w.cwrap('vec_at_idx', 'number', ['number', 'number']);
-    this._atIdx = w.cwrap('at_idx', 'number', ['number', 'number']);
-    this._atObj = w.cwrap('at_obj', 'number', ['number', 'number']);
-    this._pushObj = w.cwrap('push_obj', 'number', ['number', 'number']);
-    this._insObj = w.cwrap('ins_obj', 'number', ['number', 'number', 'number']);
-    
-    // Dict operations
-    this._initDict = w.cwrap('init_dict', 'number', ['number', 'number']);
-    this._dictKeys = w.cwrap('dict_keys', 'number', ['number']);
-    this._dictVals = w.cwrap('dict_vals', 'number', ['number']);
-    this._dictGet = w.cwrap('dict_get', 'number', ['number', 'number']);
-    
-    // Table operations
-    this._initTable = w.cwrap('init_table', 'number', ['number', 'number']);
-    this._tableKeys = w.cwrap('table_keys', 'number', ['number']);
-    this._tableVals = w.cwrap('table_vals', 'number', ['number']);
-    this._tableCol = w.cwrap('table_col', 'number', ['number', 'string', 'number']);
-    this._tableRow = w.cwrap('table_row', 'number', ['number', 'number']);
-    this._tableCount = w.cwrap('table_count', 'number', ['number']);
-    
+    this._getObjType     = w.cwrap('get_obj_type',     'number', ['number']);
+    this._getObjLen      = w.cwrap('get_obj_len',      'number', ['number']);
+    this._isObjAtom      = w.cwrap('is_obj_atom',      'number', ['number']);
+    this._isObjVector    = w.cwrap('is_obj_vector',    'number', ['number']);
+    this._isObjNull      = w.cwrap('is_obj_null',      'number', ['number']);
+    this._isObjError     = w.cwrap('is_obj_error',     'number', ['number']);
+    this._getObjRc       = w.cwrap('get_obj_rc',       'number', ['number']);
+
+    // Error info
+    this._getErrorCode    = w.cwrap('get_error_code',    'string', ['number']);
+    this._getErrorMessage = w.cwrap('get_error_message', 'string', ['number']);
+    this._getErrorTrace   = w.cwrap('get_error_trace',   'number', []);
+
+    // Memory access for zero-copy views
+    this._getDataPtr      = w.cwrap('get_data_ptr',      'number', ['number']);
+    this._getElementSize  = w.cwrap('get_element_size',  'number', ['number']);
+    this._getDataByteSize = w.cwrap('get_data_byte_size','number', ['number']);
+
+    // Atom constructors
+    this._initB8         = w.cwrap('init_b8',          'number', ['number']);
+    this._initU8         = w.cwrap('init_u8',          'number', ['number']);
+    this._initI16        = w.cwrap('init_i16',         'number', ['number']);
+    this._initI32        = w.cwrap('init_i32',         'number', ['number']);
+    this._initI64        = w.cwrap('init_i64',         'number', ['number']);
+    this._initF32        = w.cwrap('init_f32',         'number', ['number']);
+    this._initF64        = w.cwrap('init_f64',         'number', ['number']);
+    this._initDate       = w.cwrap('init_date',        'number', ['number']);
+    this._initTime       = w.cwrap('init_time',        'number', ['number']);
+    this._initTimestamp  = w.cwrap('init_timestamp',   'number', ['number']);
+    this._initSymbolStr  = w.cwrap('init_symbol_str',  'number', ['string', 'number']);
+    this._initStringStr  = w.cwrap('init_string_str',  'number', ['string', 'number']);
+
+    // Atom readers
+    this._readB8         = w.cwrap('read_b8',          'number', ['number']);
+    this._readU8         = w.cwrap('read_u8',          'number', ['number']);
+    this._readI16        = w.cwrap('read_i16',         'number', ['number']);
+    this._readI32        = w.cwrap('read_i32',         'number', ['number']);
+    this._readI64        = w.cwrap('read_i64',         'number', ['number']);
+    this._readF32        = w.cwrap('read_f32',         'number', ['number']);
+    this._readF64        = w.cwrap('read_f64',         'number', ['number']);
+    this._readDate       = w.cwrap('read_date',        'number', ['number']);
+    this._readTime       = w.cwrap('read_time',        'number', ['number']);
+    this._readTimestamp  = w.cwrap('read_timestamp',   'number', ['number']);
+    this._readSymbolId   = w.cwrap('read_symbol_id',   'number', ['number']);
+    this._symbolToStr    = w.cwrap('symbol_to_str',    'string', ['number']);
+
+    // String helpers (RAY_STR atoms + RAY_STR vector cells)
+    this._strAtomPtr     = w.cwrap('str_atom_ptr',     'string', ['number']);
+    this._strAtomLen     = w.cwrap('str_atom_len',     'number', ['number']);
+    this._strVecGet      = w.cwrap('str_vec_get',      'string', ['number', 'number']);
+
+    // CSV
+    this._readCSV        = w.cwrap('read_csv',         'number', ['string']);
+
+    // Vector / list constructors and ops
+    this._initVector     = w.cwrap('init_vector',      'number', ['number', 'number']);
+    this._initList       = w.cwrap('init_list',        'number', ['number']);
+    this._vecAtIdx       = w.cwrap('vec_at_idx',       'number', ['number', 'number']);
+    this._vecSetIdx      = w.cwrap('vec_set_idx',      'number', ['number', 'number', 'number']);
+    this._vecPush        = w.cwrap('vec_push',         'number', ['number', 'number']);
+    this._vecInsert      = w.cwrap('vec_insert',       'number', ['number', 'number', 'number']);
+
+    // Dict
+    this._initDict       = w.cwrap('init_dict',        'number', ['number', 'number']);
+    this._dictKeys       = w.cwrap('dict_keys',        'number', ['number']);
+    this._dictVals       = w.cwrap('dict_vals',        'number', ['number']);
+    this._dictGet        = w.cwrap('dict_get',         'number', ['number', 'number']);
+
+    // Table
+    this._initTable      = w.cwrap('init_table',       'number', ['number', 'number']);
+    this._tableKeys      = w.cwrap('table_keys',       'number', ['number']);
+    this._tableVals      = w.cwrap('table_vals',       'number', ['number']);
+    this._tableCol       = w.cwrap('table_col',        'number', ['number', 'string', 'number']);
+    this._tableRow       = w.cwrap('table_row',        'number', ['number', 'number']);
+    this._tableCount     = w.cwrap('table_count',      'number', ['number']);
+
     // Query operations
-    this._querySelect = w.cwrap('query_select', 'number', ['number']);
-    this._queryUpdate = w.cwrap('query_update', 'number', ['number']);
-    this._tableInsert = w.cwrap('table_insert', 'number', ['number', 'number']);
-    this._tableUpsert = w.cwrap('table_upsert', 'number', ['number', 'number', 'number']);
-    
-    // Other operations
-    this._internSymbol = w.cwrap('intern_symbol', 'number', ['string', 'number']);
-    this._globalSet = w.cwrap('global_set', null, ['number', 'number']);
-    this._quoteObj = w.cwrap('quote_obj', 'number', ['number']);
-    this._serialize = w.cwrap('serialize', 'number', ['number']);
-    this._deserialize = w.cwrap('deserialize', 'number', ['number']);
-    this._getTypeName = w.cwrap('get_type_name', 'string', ['number']);
+    this._querySelect    = w.cwrap('query_select',     'number', ['number']);
+    this._queryUpdate    = w.cwrap('query_update',     'number', ['number']);
+    this._tableInsert    = w.cwrap('table_insert',     'number', ['number', 'number']);
+    this._tableUpsert    = w.cwrap('table_upsert',     'number', ['number', 'number', 'number']);
+
+    // Misc
+    this._internSymbol   = w.cwrap('intern_symbol',    'number', ['string', 'number']);
+    this._globalSet      = w.cwrap('global_set',       'number', ['number', 'number']);
+    this._getTypeName    = w.cwrap('get_type_name',    'string', ['number']);
   }
 
   // ==========================================================================
@@ -251,34 +269,32 @@ class RayforceSDK {
     // Atoms (scalars)
     if (isAtom) {
       switch (absType) {
-        case Types.B8: return new B8(this, ptr);
-        case Types.U8: return new U8(this, ptr);
-        case Types.C8: return new C8(this, ptr);
-        case Types.I16: return new I16(this, ptr);
-        case Types.I32: return new I32(this, ptr);
-        case Types.I64: return new I64(this, ptr);
-        case Types.F64: return new F64(this, ptr);
-        case Types.DATE: return new RayDate(this, ptr);
-        case Types.TIME: return new RayTime(this, ptr);
+        case Types.B8:        return new B8(this, ptr);
+        case Types.U8:        return new U8(this, ptr);
+        case Types.I16:       return new I16(this, ptr);
+        case Types.I32:       return new I32(this, ptr);
+        case Types.I64:       return new I64(this, ptr);
+        case Types.F32:       return new F32(this, ptr);
+        case Types.F64:       return new F64(this, ptr);
+        case Types.DATE:      return new RayDate(this, ptr);
+        case Types.TIME:      return new RayTime(this, ptr);
         case Types.TIMESTAMP: return new RayTimestamp(this, ptr);
-        case Types.SYMBOL: return new Symbol(this, ptr);
-        case Types.GUID: return new GUID(this, ptr);
-        default: return new RayObject(this, ptr);
+        case Types.SYM:       return new Sym(this, ptr);
+        case Types.STR:       return new RayString(this, ptr);
+        case Types.GUID:      return new GUID(this, ptr);
+        default:              return new RayObject(this, ptr);
       }
     }
-    
+
     // Vectors and containers
     switch (type) {
-      case Types.C8: return new RayString(this, ptr);
-      case Types.LIST: return new List(this, ptr);
-      case Types.DICT: return new Dict(this, ptr);
-      case Types.TABLE: return new Table(this, ptr);
+      case Types.STR:    return new StrVector(this, ptr);
+      case Types.LIST:   return new List(this, ptr);
+      case Types.DICT:   return new Dict(this, ptr);
+      case Types.TABLE:  return new Table(this, ptr);
       case Types.LAMBDA: return new Lambda(this, ptr);
       default:
-        // Numeric vectors
-        if (TYPED_ARRAY_MAP[type]) {
-          return new Vector(this, ptr, type);
-        }
+        if (TYPED_ARRAY_MAP[type]) return new Vector(this, ptr, type);
         return new RayObject(this, ptr);
     }
   }
@@ -306,22 +322,21 @@ class RayforceSDK {
   }
 
   /**
-   * Create a character value
-   * @param {string} value - Single character
-   * @returns {C8}
-   */
-  c8(value) {
-    const code = value.charCodeAt(0);
-    return new C8(this, this._initC8(code));
-  }
-
-  /**
    * Create a 16-bit integer
    * @param {number} value
    * @returns {I16}
    */
   i16(value) {
     return new I16(this, this._initI16(value | 0));
+  }
+
+  /**
+   * Create a 32-bit float
+   * @param {number} value
+   * @returns {F32}
+   */
+  f32(value) {
+    return new F32(this, this._initF32(value));
   }
 
   /**
@@ -406,10 +421,10 @@ class RayforceSDK {
   /**
    * Create a symbol (interned string)
    * @param {string} value
-   * @returns {Symbol}
+   * @returns {Sym}
    */
   symbol(value) {
-    return new Symbol(this, this._initSymbolStr(value, value.length));
+    return new Sym(this, this._initSymbolStr(value, value.length));
   }
 
   /**
@@ -430,11 +445,14 @@ class RayforceSDK {
   vector(type, lengthOrData) {
     if (Array.isArray(lengthOrData)) {
       const arr = lengthOrData;
+      // v2 vectors are growable; init_vector takes a capacity hint, then
+      // each push appends.  For typed numeric vectors we still allocate
+      // up-front and write through the typed-array view for speed.
       const vec = new Vector(this, this._initVector(type, arr.length), type);
       const view = vec.typedArray;
       for (let i = 0; i < arr.length; i++) {
-        if (type === Types.I64 || type === Types.TIMESTAMP || type === Types.SYMBOL) {
-          view[i] = BigInt(arr[i]);
+        if (type === Types.I64 || type === Types.TIMESTAMP || type === Types.SYM) {
+          view[i] = BigInt(type === Types.SYM ? this._internSymbol(arr[i], arr[i].length) : arr[i]);
         } else {
           view[i] = arr[i];
         }
@@ -467,12 +485,12 @@ class RayforceSDK {
    */
   dict(obj) {
     const keys = Object.keys(obj);
-    const keyVec = this.vector(Types.SYMBOL, keys.length);
+    const keyVec = this.vector(Types.SYM, keys.length);
     const keyView = keyVec.typedArray;
     for (let i = 0; i < keys.length; i++) {
       keyView[i] = BigInt(this._internSymbol(keys[i], keys[i].length));
     }
-    
+
     const valList = this.list(Object.values(obj).map(v => this._toRayObject(v)));
     return new Dict(this, this._initDict(keyVec._ptr, valList._ptr));
   }
@@ -484,19 +502,17 @@ class RayforceSDK {
    */
   table(columns) {
     const colNames = Object.keys(columns);
-    const keyVec = this.vector(Types.SYMBOL, colNames.length);
+    const keyVec = this.vector(Types.SYM, colNames.length);
     const keyView = keyVec.typedArray;
     for (let i = 0; i < colNames.length; i++) {
       keyView[i] = BigInt(this._internSymbol(colNames[i], colNames[i].length));
     }
-    
+
     const valList = this.list();
     for (const name of colNames) {
-      const data = columns[name];
-      const col = this._arrayToVector(data);
-      valList.push(col);
+      valList.push(this._arrayToVector(columns[name]));
     }
-    
+
     return new Table(this, this._initTable(keyVec._ptr, valList._ptr));
   }
 
@@ -520,19 +536,19 @@ class RayforceSDK {
     } else if (typeof first === 'bigint') {
       type = Types.I64;
     } else if (typeof first === 'string') {
-      type = Types.SYMBOL;
+      type = Types.SYM;
     } else if (first instanceof Date) {
       type = Types.TIMESTAMP;
     } else {
       // Default to list for mixed types
       return this.list(arr.map(v => this._toRayObject(v)));
     }
-    
+
     const vec = this.vector(type, arr.length);
     const view = vec.typedArray;
-    
+
     for (let i = 0; i < arr.length; i++) {
-      if (type === Types.SYMBOL) {
+      if (type === Types.SYM) {
         view[i] = BigInt(this._internSymbol(arr[i], arr[i].length));
       } else if (type === Types.I64 || type === Types.TIMESTAMP) {
         if (arr[i] instanceof Date) {
@@ -547,7 +563,7 @@ class RayforceSDK {
         view[i] = arr[i];
       }
     }
-    
+
     return vec;
   }
 
@@ -584,6 +600,29 @@ class RayforceSDK {
     const sym = this.symbol(name);
     const val = value instanceof RayObject ? value : this._toRayObject(value);
     this._globalSet(sym._ptr, val._ptr);
+  }
+
+  /**
+   * Load a CSV from a buffer.  v2 dropped the buffer-based reader, so we
+   * write the buffer to Emscripten MEMFS at /tmp/<name>, call the
+   * file-based ray_read_csv, and unlink afterwards.  Type inference is
+   * delegated to the engine (sample-based) — numeric columns come back
+   * as numeric vectors, not strings (an improvement over v1 behavior).
+   * @param {Uint8Array|ArrayBuffer} buffer
+   * @param {string} [name] - Filename hint for error messages.
+   * @returns {Table|RayError}
+   */
+  readCSV(buffer, name = `mem-${Date.now()}.csv`) {
+    const path = `/tmp/${name}`;
+    const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    this._wasm.FS.writeFile(path, data);
+    let ptr;
+    try {
+      ptr = this._readCSV(path);
+    } finally {
+      try { this._wasm.FS.unlink(path); } catch (_) {}
+    }
+    return this._wrapPtr(ptr);
   }
 
   /**
@@ -690,11 +729,14 @@ class RayObject {
   }
 
   /**
-   * Clone this object
+   * Clone this object.  In v2 ray_t* values are reference-counted COW
+   * blocks, so "clone" just bumps the refcount and shares the same
+   * pointer — actual byte-level duplication happens lazily on write.
    * @returns {RayObject}
    */
   clone() {
-    return this._sdk._wrapPtr(this._sdk._cloneObj(this._ptr));
+    this._sdk._retain(this._ptr);
+    return this._sdk._wrapPtr(this._ptr);
   }
 
   /**
@@ -714,11 +756,12 @@ class RayObject {
   }
 
   /**
-   * Free this object's memory
+   * Free this object's memory (decrements refcount; arena-flagged blocks
+   * like RAY_NULL_OBJ are silently no-op'd inside ray_release).
    */
   drop() {
     if (this._owned && this._ptr !== 0) {
-      this._sdk._dropObj(this._ptr);
+      this._sdk._release(this._ptr);
       this._ptr = 0;
       this._owned = false;
     }
@@ -762,18 +805,6 @@ class U8 extends RayObject {
   }
 }
 
-class C8 extends RayObject {
-  static typeCode = -Types.C8;
-  
-  get value() {
-    return String.fromCharCode(this._sdk._readC8(this._ptr));
-  }
-  
-  toJS() {
-    return this.value;
-  }
-}
-
 class I16 extends RayObject {
   static typeCode = -Types.I16;
   
@@ -810,13 +841,25 @@ class I64 extends RayObject {
   }
 }
 
+class F32 extends RayObject {
+  static typeCode = -Types.F32;
+
+  get value() {
+    return this._sdk._readF32(this._ptr);
+  }
+
+  toJS() {
+    return this.value;
+  }
+}
+
 class F64 extends RayObject {
   static typeCode = -Types.F64;
-  
+
   get value() {
     return this._sdk._readF64(this._ptr);
   }
-  
+
   toJS() {
     return this.value;
   }
@@ -877,27 +920,26 @@ class RayTimestamp extends RayObject {
   }
 }
 
-class Symbol extends RayObject {
-  static typeCode = -Types.SYMBOL;
-  
-  /**
-   * Get interned symbol ID
-   */
+class Sym extends RayObject {
+  static typeCode = -Types.SYM;
+
+  /** Interned symbol ID (int64). */
   get id() {
     return this._sdk._readSymbolId(this._ptr);
   }
-  
-  /**
-   * Get symbol string value
-   */
+
+  /** Symbol string value (reverse-looked up from the intern table). */
   get value() {
     return this._sdk._symbolToStr(this.id);
   }
-  
+
   toJS() {
     return this.value;
   }
 }
+
+// Backward-compat alias — the old Symbol export shadowed the global.
+const SymbolClass = Sym;
 
 class GUID extends RayObject {
   static typeCode = -Types.GUID;
@@ -926,17 +968,34 @@ class RayNull extends RayObject {
 
 class RayError extends RayObject {
   static typeCode = Types.ERR;
-  
+
   get isError() {
     return true;
   }
-  
-  get message() {
-    return this.toString();
+
+  /** Inline 7-byte error code (e.g. "type", "domain", "user", "oom"). */
+  get code() {
+    return this._sdk._getErrorCode(this._ptr);
   }
-  
+
+  /**
+   * Per-VM error message text.  Snapshotted into a stable buffer on the
+   * C side, so this getter is safe to read at any time after the error
+   * was raised — but the snapshot is overwritten by the next ray_error()
+   * call, so capture it eagerly if you need to compare across evals.
+   */
+  get message() {
+    return this._sdk._getErrorMessage(this._ptr);
+  }
+
+  toString() {
+    const c = this.code;
+    const m = this.message;
+    return m ? `${c}: ${m}` : c;
+  }
+
   toJS() {
-    throw new Error(this.message);
+    throw new Error(this.toString());
   }
 }
 
@@ -996,7 +1055,7 @@ class Vector extends RayObject {
     const val = this.typedArray[idx];
     
     // Convert symbol IDs to strings
-    if (!raw && this._elementType === Types.SYMBOL) {
+    if (!raw && this._elementType === Types.SYM) {
       return this._sdk._symbolToStr(Number(val));
     }
     
@@ -1030,11 +1089,11 @@ class Vector extends RayObject {
     const arr = Array.from(this.typedArray);
     
     // Convert BigInt to Number for I64 types if safe
-    if (this._elementType === Types.I64 || 
+    if (this._elementType === Types.I64 ||
         this._elementType === Types.TIMESTAMP ||
-        this._elementType === Types.SYMBOL) {
+        this._elementType === Types.SYM) {
       return arr.map(v => {
-        if (this._elementType === Types.SYMBOL) {
+        if (this._elementType === Types.SYM) {
           return this._sdk._symbolToStr(Number(v));
         }
         const n = Number(v);
@@ -1057,21 +1116,18 @@ class Vector extends RayObject {
 }
 
 // ============================================================================
-// String (Character Vector)
+// String atom (RAY_STR)
+//
+// v2 strings are atoms with SSO inline storage for ≤7 bytes and an
+// extension-block ray_t* for longer strings.  str_atom_ptr / str_atom_len
+// hide the layout difference; from JS we just see a const char* + length.
 // ============================================================================
 
-class RayString extends Vector {
-  constructor(sdk, ptr) {
-    super(sdk, ptr, Types.C8);
-  }
+class RayString extends RayObject {
+  static typeCode = -Types.STR;
 
-  /**
-   * Get string value
-   * @returns {string}
-   */
   get value() {
-    const decoder = new TextDecoder('utf-8');
-    return decoder.decode(this.typedArray);
+    return this._sdk._strAtomPtr(this._ptr);
   }
 
   toJS() {
@@ -1080,6 +1136,34 @@ class RayString extends Vector {
 
   toString() {
     return this.value;
+  }
+}
+
+// ============================================================================
+// String vector (RAY_STR vector)
+//
+// Per-cell ray_str_t structs aren't typed-array-viewable — read each cell
+// via _strVecGet, which copies the bytes into a thread-local C buffer that
+// Emscripten then turns into a JS string.
+// ============================================================================
+
+class StrVector extends RayObject {
+  at(idx) {
+    if (idx < 0) idx = this.length + idx;
+    if (idx < 0 || idx >= this.length) {
+      throw new RangeError(`Index ${idx} out of bounds [0, ${this.length})`);
+    }
+    return this._sdk._strVecGet(this._ptr, idx);
+  }
+
+  toJS() {
+    const out = new Array(this.length);
+    for (let i = 0; i < this.length; i++) out[i] = this.at(i);
+    return out;
+  }
+
+  *[globalThis.Symbol.iterator]() {
+    for (let i = 0; i < this.length; i++) yield this.at(i);
   }
 }
 
@@ -1098,36 +1182,29 @@ class List extends RayObject {
     if (idx < 0 || idx >= this.length) {
       throw new RangeError(`Index ${idx} out of bounds [0, ${this.length})`);
     }
-    const ptr = this._sdk._atIdx(this._ptr, idx);
-    return this._sdk._wrapPtr(ptr);
+    return this._sdk._wrapPtr(this._sdk._vecAtIdx(this._ptr, idx));
   }
 
   /**
-   * Set element at index
+   * Set element at index.  Note: v2 list ops are COW — a fresh ptr is
+   * returned and we rebind so the JS handle keeps pointing at the live
+   * version.  The returned ray_t* may share storage with the previous one.
    * @param {number} idx
    * @param {RayObject|any} value
    */
   set(idx, value) {
     if (idx < 0) idx = this.length + idx;
     const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    this._sdk._wasm.ccall('ins_obj', 'number', 
-      ['number', 'number', 'number'], 
-      [this._ptr, idx, obj._ptr]);
+    this._ptr = this._sdk._vecSetIdx(this._ptr, idx, obj._ptr);
   }
 
   /**
-   * Push element to end
-   * @param {RayObject|any} value
+   * Push element to end.  COW semantics: rebind self to the (possibly
+   * new) parent pointer returned by ray_list_append.
    */
   push(value) {
     const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    // Use stack allocation for the pointer-to-pointer
-    const stackSave = this._sdk._wasm.stackSave();
-    const ptrPtr = this._sdk._wasm.stackAlloc(4);
-    this._sdk._wasm.setValue(ptrPtr, this._ptr, 'i32');
-    this._sdk._pushObj(ptrPtr, obj._ptr);
-    this._ptr = this._sdk._wasm.getValue(ptrPtr, 'i32');
-    this._sdk._wasm.stackRestore(stackSave);
+    this._ptr = this._sdk._vecPush(this._ptr, obj._ptr);
   }
 
   /**
@@ -1172,7 +1249,7 @@ class Dict extends RayObject {
 
   /**
    * Get value by key
-   * @param {string|Symbol} key
+   * @param {string|Sym} key
    * @returns {RayObject}
    */
   get(key) {
@@ -1513,48 +1590,39 @@ class SelectQuery {
   }
 
   /**
-   * Execute the query
-   * @returns {Table}
+   * Execute the query.
+   *
+   * v2's ray_select_fn evaluates the dict body as an AST node — its `from:`
+   * slot expects an unevaluated symbol/expression, not a raw ray_t* stuffed
+   * in as an i64 atom.  We bind the live table to a temporary global,
+   * render the query as a Rayfall string, eval, then leave the binding for
+   * the caller to clean up (eval's name resolution catches it).
+   * @returns {Table|RayError}
    */
   execute() {
-    // Build query dict
-    const query = {};
-    
-    // from clause
-    query.from = this._table._ptr;
-    
-    // select columns
-    if (this._selectCols) {
-      for (const col of this._selectCols) {
-        if (typeof col === 'string') {
-          query[col] = col;
-        } else if (col instanceof Expr) {
-          // Need alias for expressions
-        }
+    const sdk = this._sdk;
+    const tableSym = `__rfq_${++sdk._cmdCounter}`;
+    sdk.set(tableSym, this._table);
+
+    const parts = [`from: ${tableSym}`];
+
+    if (this._selectCols && this._selectCols.length) {
+      for (const c of this._selectCols) {
+        if (typeof c === 'string')   parts.push(`${c}: ${c}`);
+        else if (c instanceof Expr)  parts.push(`${c.toString()}`);
       }
     }
-    
-    // computed columns
     for (const [name, expr] of Object.entries(this._computedCols)) {
-      query[name] = expr.toString();
+      parts.push(`${name}: ${expr.toString()}`);
     }
-    
-    // where clause
-    if (this._whereCond) {
-      query.where = this._whereCond.toString();
+    if (this._whereCond) parts.push(`where: ${this._whereCond.toString()}`);
+    if (this._byCols && this._byCols.length) {
+      const by = this._byCols.map(c => `${c}: ${c}`).join(' ');
+      parts.push(`by: {${by}}`);
     }
-    
-    // group by
-    if (this._byCols) {
-      query.by = {};
-      for (const col of this._byCols) {
-        query.by[col] = col;
-      }
-    }
-    
-    // Build and execute query
-    const queryDict = this._sdk.dict(query);
-    return this._sdk._wrapPtr(this._sdk._querySelect(queryDict._ptr));
+
+    const expr = `(select {${parts.join(' ')}})`;
+    return sdk.eval(expr, 'select-query');
   }
 
   _clone() {
@@ -1576,12 +1644,15 @@ export {
   RayObject,
   RayNull,
   RayError,
-  B8, U8, C8, I16, I32, I64, F64,
+  B8, U8, I16, I32, I64, F32, F64,
   RayDate, RayTime, RayTimestamp,
-  Symbol, GUID,
-  Vector, RayString, List, Dict, Table, Lambda,
+  Sym, GUID,
+  Vector, RayString, StrVector, List, Dict, Table, Lambda,
   Expr, SelectQuery,
 };
+
+// Backward-compat alias — v0.x consumers imported `Symbol` from this module.
+export { Sym as Symbol };
 
 // Default export for UMD/CDN usage
 export default {

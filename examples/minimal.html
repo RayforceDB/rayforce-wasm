@@ -4,49 +4,101 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RayforceDB Minimal Example</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
     <style>
+        :root {
+            --bg: #0a0e13;
+            --bg-section: #0d1219;
+            --primary: #e9a033;
+            --primary-light: #f0b954;
+            --accent: #5eead4;
+            --accent-blue: #60a5fa;
+            --text: #f1f5f9;
+            --text-muted: #7b8fa0;
+            --border: rgba(233, 160, 51, 0.10);
+            --error: #f87171;
+            --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-heading: 'Oswald', -apple-system, BlinkMacSystemFont, sans-serif;
+            --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: system-ui, sans-serif;
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
             max-width: 800px;
             margin: 2rem auto;
-            padding: 0 1rem;
-            background: #1a1a2e;
-            color: #eee;
+            padding: 0 1.5rem;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
         }
-        h1 { color: #e9a033; }
-        pre {
-            background: #0d0d1a;
-            padding: 1rem;
-            border-radius: 8px;
+        h1 {
+            font-family: var(--font-heading);
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: -0.02em;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+        pre, #output {
+            background: var(--bg-section);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
             overflow-x: auto;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            line-height: 1.7;
         }
-        code { color: #4ec9b0; }
-        .result { color: #9cdcfe; }
-        button {
-            background: #e9a033;
-            color: #1a1a2e;
-            border: none;
-            padding: 0.5rem 1rem;
+        p code {
+            font-family: var(--mono);
+            font-size: 0.85em;
+            color: var(--primary-light);
+            background: rgba(233, 160, 51, 0.10);
+            padding: 2px 6px;
             border-radius: 4px;
+        }
+        pre code { color: var(--accent); background: none; padding: 0; }
+        .result { color: var(--accent-blue); }
+        button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: var(--bg);
+            border: none;
+            padding: 0.625rem 1.5rem;
+            border-radius: 100px;
+            font-family: var(--font);
+            font-size: 0.9rem;
+            font-weight: 600;
             cursor: pointer;
-            font-weight: bold;
+            transition: transform .2s, box-shadow .2s;
+            box-shadow: 0 2px 12px rgba(233, 160, 51, 0.30);
+            margin-bottom: 1rem;
         }
-        button:hover { background: #f0b85a; }
-        #output {
-            margin-top: 1rem;
-            padding: 1rem;
-            background: #0d0d1a;
-            border-radius: 8px;
-            min-height: 100px;
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 24px rgba(233, 160, 51, 0.50);
         }
+        #output { min-height: 100px; }
     </style>
 </head>
 <body>
     <h1>⚡ RayforceDB via CDN</h1>
     <p>Using <code>https://unpkg.com/rayforce-wasm</code></p>
-    
+
     <button onclick="runDemo()">Run Demo</button>
-    
+
     <div id="output">Click "Run Demo" to start...</div>
 
     <!-- Load RayforceDB from CDN -->
@@ -60,36 +112,36 @@
             try {
                 // Initialize RayforceDB
                 const rf = await createRayforce();
-                
+
                 // Helper to evaluate and format result
                 const evaluate = (expr) => {
                     const result = rf._eval_str(expr);
                     return rf.UTF8ToString(rf._strof_obj(result));
                 };
-                
+
                 let results = [];
-                
+
                 // 1. Simple evaluation
                 results.push('📊 <b>Evaluate expressions:</b>');
                 results.push(`(sum [1 2 3 4 5]) = ${evaluate('(sum [1 2 3 4 5])')}`);
                 results.push(`(avg [10 20 30]) = ${evaluate('(avg [10 20 30])')}`);
                 results.push(`(til 10) = ${evaluate('(til 10)')}`);
-                
+
                 // 2. Vector operations
                 results.push('');
                 results.push('🔢 <b>Vector operations:</b>');
                 results.push(`(* [1 2 3] [4 5 6]) = ${evaluate('(* [1 2 3] [4 5 6])')}`);
                 results.push(`(reverse [1 2 3 4 5]) = ${evaluate('(reverse [1 2 3 4 5])')}`);
-                
+
                 // 3. Lambda
                 results.push('');
                 results.push('λ <b>Lambda functions:</b>');
                 results.push(`((fn [x] (* x x)) 7) = ${evaluate('((fn [x] (* x x)) 7)')}`);
-                
+
                 output.innerHTML = '<pre>' + results.join('\n') + '</pre>';
-                
+
             } catch (err) {
-                output.innerHTML = `<pre style="color: #ff6b6b;">Error: ${err.message}</pre>`;
+                output.innerHTML = `<pre style="color: var(--error);">Error: ${err.message}</pre>`;
             }
         };
     </script>

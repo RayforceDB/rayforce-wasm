@@ -25,9 +25,6 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/RayforceDB/rayforce.git src/rayforce-repo
           echo "Rayforce commit: $(cd src/rayforce-repo && git rev-parse --short HEAD)"
-          echo "=== Verifying math.c direct call fix ==="
-          grep -c "return.*(obj_p" src/rayforce-repo/core/math.c
-          grep -n "obj_p(\*)" src/rayforce-repo/core/math.c | head -8
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14

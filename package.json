@@ -26,7 +26,8 @@
     "build": "make app",
     "build:dev": "make dev",
     "test": "node test.mjs && node test-contract.mjs",
-    "prepublishOnly": "npm run build && npm test",
+    "test:examples": "node test-examples.mjs",
+    "prepublishOnly": "npm run build && npm test && npm run test:examples",
     "serve": "python3 -m http.server 8080"
   },
   "keywords": [

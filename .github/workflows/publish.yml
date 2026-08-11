@@ -38,5 +38,8 @@ jobs:
           package_version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
           test "$RELEASE_TAG" = "v$package_version"
 
+      - name: Install browser test dependency
+        run: npm install --ignore-scripts --no-package-lock
+
       - name: Publish package
         run: npm publish

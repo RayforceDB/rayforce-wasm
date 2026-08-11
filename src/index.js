@@ -9,22 +9,21 @@
  *   const rf = await init();
  *   const result = rf.eval('(+ 1 2)');
  * 
- * Usage (CDN script tag):
- *   <script src="https://cdn.../rayforce.umd.js"></script>
- *   <script>
- *     Rayforce.init().then(rf => {
- *       console.log(rf.eval('(+ 1 2)').toJS());
- *     });
+ * Usage (browser ES module):
+ *   <script type="module">
+ *     import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+ *     const rf = await init();
+ *     console.log(rf.eval('(+ 1 2)').toJS());
  *   </script>
  * 
  * @module rayforce
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 import { createRayforceSDK, Types, Expr } from './rayforce.sdk.js';
 
 // SDK version
-export const version = '0.1.0';
+export const version = '0.2.0';
 
 // Re-export types and utilities
 export { Types, Expr };

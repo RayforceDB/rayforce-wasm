@@ -5,7 +5,7 @@
  * Provides TypedArray views over native Rayforce vectors for efficient data access.
  * 
  * @module rayforce
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 // ============================================================================
@@ -155,6 +155,7 @@ class RayforceSDK {
     this._readTimestamp  = w.cwrap('read_timestamp',   'number', ['number']);
     this._readSymbolId   = w.cwrap('read_symbol_id',   'number', ['number']);
     this._symbolToStr    = w.cwrap('symbol_to_str',    'string', ['number']);
+    this._symbolVecGet   = w.cwrap('symbol_vec_get',   'string', ['number', 'number']);
 
     // String helpers (RAY_STR atoms + RAY_STR vector cells)
     this._strAtomPtr     = w.cwrap('str_atom_ptr',     'string', ['number']);
@@ -1056,7 +1057,7 @@ class Vector extends RayObject {
     
     // Convert symbol IDs to strings
     if (!raw && this._elementType === Types.SYM) {
-      return this._sdk._symbolToStr(Number(val));
+      return this._sdk._symbolVecGet(this._ptr, idx);
     }
     
     // Convert BigInt to Number if safe
@@ -1092,9 +1093,9 @@ class Vector extends RayObject {
     if (this._elementType === Types.I64 ||
         this._elementType === Types.TIMESTAMP ||
         this._elementType === Types.SYM) {
-      return arr.map(v => {
+      return arr.map((v, idx) => {
         if (this._elementType === Types.SYM) {
-          return this._sdk._symbolToStr(Number(v));
+          return this._sdk._symbolVecGet(this._ptr, idx);
         }
         const n = Number(v);
         return Number.isSafeInteger(n) ? n : v;

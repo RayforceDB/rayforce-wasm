@@ -8,7 +8,7 @@ Full-featured JavaScript SDK for [RayforceDB](https://rayforcedb.com) with zero-
 - 📊 **Full Type System** - All Rayforce types: scalars, vectors, lists, dicts, tables
 - 🔍 **Query Builder** - Fluent API for building and executing queries
 - 💾 **Memory Efficient** - No data copying for vector operations
-- 🌐 **CDN Ready** - UMD bundle for script tag usage
+- 🌐 **CDN Ready** - Browser-native ES modules
 - ⚡ **SIMD Optimized** - Native WASM SIMD support
 
 ## Quick Start
@@ -16,15 +16,12 @@ Full-featured JavaScript SDK for [RayforceDB](https://rayforcedb.com) with zero-
 ### ES6 Module
 
 ```javascript
-import { createRayforceSDK, Types } from 'rayforce-wasm';
+import { init, Types } from 'rayforce-wasm';
 
-// Initialize
-const createRayforce = (await import('./rayforce.js')).default;
-const wasm = await createRayforce();
-const rf = createRayforceSDK(wasm);
+const rf = await init();
 
 // Evaluate expressions
-const result = rf.eval('(+ 1 2 3)');
+const result = rf.eval('(+ (+ 1 2) 3)');
 console.log(result.toJS()); // 6
 
 // Create vectors with zero-copy access
@@ -37,18 +34,17 @@ console.log(vec.toJS()); // [100, 2, 3, 4, 5]
 ### CDN / Script Tag
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/rayforce-wasm/dist/rayforce.umd.js"></script>
-<script>
-  Rayforce.init().then(rf => {
-    console.log(rf.eval('(sum (til 100))').toJS()); // 4950
-  });
+<script type="module">
+  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+
+  const rf = await init();
+  console.log(rf.eval('(sum (til 100))').toJS()); // 4950
 </script>
 ```
 
 ## Installation
 
 ```bash
-# From npm (coming soon)
 npm install rayforce-wasm
 
 # Build from source
@@ -60,19 +56,20 @@ make wasm
 ### Initialization
 
 ```javascript
-// ES6
-import { createRayforceSDK, Types } from './rayforce.sdk.js';
-const rf = createRayforceSDK(wasmModule);
+// npm / ES modules
+import { init, Types } from 'rayforce-wasm';
+const rf = await init();
 
-// UMD
-const rf = await Rayforce.init({ wasmPath: './rayforce.js' });
+// Low-level SDK wrapper (for an already initialized WASM module)
+import { createRayforceSDK } from 'rayforce-wasm/sdk';
+const lowLevelRF = createRayforceSDK(wasmModule);
 ```
 
 ### Evaluation
 
 ```javascript
 // Evaluate Rayfall expression
-const result = rf.eval('(+ 1 2 3)');
+const result = rf.eval('(+ (+ 1 2) 3)');
 console.log(result.toJS()); // 6
 
 // With source tracking (for better error messages)
@@ -234,7 +231,7 @@ col.distinct()
 
 ### Prerequisites
 
-- [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
+- [Emscripten SDK 6.0.6](https://emscripten.org/docs/getting_started/downloads.html)
 - Make
 
 ### Build
@@ -246,7 +243,7 @@ cd rayforce-wasm
 
 # Install Emscripten (if not already installed)
 git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk && ./emsdk install latest && ./emsdk activate latest
+cd emsdk && ./emsdk install 6.0.6 && ./emsdk activate 6.0.6
 source emsdk_env.sh
 cd ..
 
@@ -268,8 +265,10 @@ dist/
 ├── rayforce.js       # WASM loader (ES6)
 ├── rayforce.wasm     # WASM binary
 ├── rayforce.sdk.js   # SDK module (ES6)
-├── rayforce.umd.js   # SDK bundle (UMD)
-└── index.js          # Entry point
+├── rayforce.umd.js   # Legacy-named browser ESM bootstrap
+├── index.js          # Entry point
+├── index.d.ts        # Entry-point TypeScript definitions
+└── rayforce.sdk.d.ts # SDK TypeScript definitions
 ```
 
 ## Performance

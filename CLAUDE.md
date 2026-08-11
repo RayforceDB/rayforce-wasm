@@ -9,10 +9,10 @@ rayforce-wasm provides WebAssembly bindings and a full JavaScript SDK for Rayfor
 ## Build Commands
 
 ```bash
-# Prerequisites: Install Emscripten SDK
+# Prerequisites: Install Emscripten SDK 6.0.6
 # https://emscripten.org/docs/getting_started/downloads.html
 git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk && ./emsdk install latest && ./emsdk activate latest
+cd emsdk && ./emsdk install 6.0.6 && ./emsdk activate 6.0.6
 source emsdk_env.sh
 
 # Full build from GitHub
@@ -45,8 +45,8 @@ make clean-all
 ### Build System
 
 - **Makefile** - Main build orchestration
-  - `pull` - Clones RayforceDB from GitHub to `build/rayforce-c/`
-  - `sync` - Copies from local `../rayforce/` for development
+  - `pull` - Clones the pinned RayforceDB release to `src/rayforce-repo/`
+  - `dev` - Builds against local `../rayforce/` sources
   - `wasm` - Compiles to ES6 WASM module + copies SDK files
   - `wasm-standalone` - Includes preloaded example files
   - `wasm-debug` - Debug build with assertions and safe heap
@@ -61,18 +61,19 @@ rayforce-wasm/
 ├── src/
 │   ├── main.c            # WASM entry point with all exports
 │   ├── rayforce.sdk.js   # ES6 SDK module
-│   ├── rayforce.umd.js   # UMD bundle for CDN
-│   └── index.js          # Main entry point
+│   ├── rayforce.umd.js   # Legacy-named browser ESM bootstrap
+│   ├── index.js          # Main entry point
+│   └── index.d.ts        # Entry-point TypeScript definitions
 ├── build/
-│   ├── rayforce-c/       # Cloned RayforceDB repo
 │   ├── obj/              # Compiled object files
 │   └── librayforce.a     # Static library
 ├── dist/
 │   ├── rayforce.js       # ES6 WASM module loader
 │   ├── rayforce.wasm     # WebAssembly binary
 │   ├── rayforce.sdk.js   # SDK module
-│   ├── rayforce.umd.js   # UMD bundle
-│   └── index.js          # Entry point
+│   ├── rayforce.umd.js   # Browser ESM bootstrap
+│   ├── index.js          # Entry point
+│   └── index.d.ts        # Entry-point TypeScript definitions
 └── examples/             # Usage examples
 ```
 
@@ -91,7 +92,7 @@ const wasm = await createRayforce();
 const rf = createRayforceSDK(wasm);
 
 // Evaluate expressions
-const result = rf.eval('(+ 1 2 3)');
+const result = rf.eval('(+ (+ 1 2) 3)');
 console.log(result.toJS()); // 6
 
 // Zero-copy vector operations
@@ -113,12 +114,11 @@ console.log(table.toRows());
 ### CDN/Script Tag
 
 ```html
-<script src="https://cdn.../rayforce.umd.js"></script>
-<script>
-  Rayforce.init({ wasmPath: './rayforce.js' }).then(rf => {
-    const result = rf.eval('(sum (til 100))');
-    console.log(result.toJS()); // 4950
-  });
+<script type="module">
+  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+  const rf = await init();
+  const result = rf.eval('(sum (til 100))');
+  console.log(result.toJS()); // 4950
 </script>
 ```
 
@@ -229,7 +229,7 @@ console.log(table.toRows());
 
 ## Platform Notes
 
-- Requires Emscripten SDK (emsdk) in PATH
+- Requires Emscripten SDK 6.0.6 (emsdk) in PATH
 - `emcc` and `emar` must be available
 - Built WASM requires CORS headers for cross-origin usage
 - Use `make serve` for local testing (handles CORS)

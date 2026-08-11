@@ -21,21 +21,27 @@ jobs:
       - name: Checkout rayforce-wasm
         uses: actions/checkout@v4
 
-      - name: Clone rayforce
-        run: |
-          git clone --depth 1 https://github.com/RayforceDB/rayforce.git src/rayforce-repo
-          echo "Rayforce commit: $(cd src/rayforce-repo && git rev-parse --short HEAD)"
-
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v16
         with:
-          version: '3.1.5'
+          version: '6.0.6'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Build WASM
         run: |
           echo "Emscripten version: $(emcc --version | head -1)"
-          RAYFORCE_SRC_DIR=src/rayforce-repo make wasm
+          make app
           echo "WASM size: $(ls -la dist/rayforce.wasm | awk '{print $5}')"
+
+      - name: Test npm package
+        run: |
+          npm test
+          npm pack --dry-run
 
       - name: Prepare deployment
         run: |
@@ -47,6 +53,7 @@ jobs:
           cp dist/rayforce.sdk.d.ts _site/
           cp dist/rayforce.umd.js _site/
           cp dist/index.js _site/
+          cp dist/index.d.ts _site/
           # Copy examples
           cp examples/index.html _site/
           cp -r examples/assets _site/

@@ -103,7 +103,7 @@
 
     <!-- Load RayforceDB from CDN -->
     <script type="module">
-        import createRayforce from 'https://unpkg.com/rayforce-wasm@0.1.0/dist/rayforce.js';
+        import { init } from 'https://unpkg.com/rayforce-wasm@0.2.0/dist/index.js';
 
         window.runDemo = async function() {
             const output = document.getElementById('output');
@@ -111,12 +111,11 @@
 
             try {
                 // Initialize RayforceDB
-                const rf = await createRayforce();
+                const rf = await init({ singleton: false });
 
                 // Helper to evaluate and format result
                 const evaluate = (expr) => {
-                    const result = rf._eval_str(expr);
-                    return rf.UTF8ToString(rf._strof_obj(result));
+                    return rf.eval(expr).toString();
                 };
 
                 let results = [];

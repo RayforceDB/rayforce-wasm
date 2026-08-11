@@ -14,16 +14,14 @@
 
 /* Public umbrella header — atom/vector/list/dict/table/sym/error API. */
 #include <rayforce.h>
+#include "mem/sys.h"
+#include "table/sym.h"
 
 /* Internal-engine functions we reach for WASM glue.  We declare them as
  * externs (rather than including the headers) because core/runtime.h and
  * lang/eval.h each define their own ray_vm_t with incompatible internal
  * fields — including both in one TU collides.  These prototypes are stable
  * across the engine's internal headers. */
-typedef struct ray_runtime_t ray_runtime_t;
-
-extern ray_runtime_t* ray_runtime_create(int argc, char** argv);
-extern void           ray_runtime_destroy(ray_runtime_t* rt);
 extern const char*    ray_error_msg(void);
 
 extern ray_t*  ray_eval_str(const char* source);
@@ -55,8 +53,9 @@ extern ray_t*  ray_read_csv(const char* path);
  * ============================================================================ */
 
 EMSCRIPTEN_KEEPALIVE int64_t ray_ipc_connect(const char* host, uint16_t port,
-                                             const char* user, const char* pw) {
-  (void)host; (void)port; (void)user; (void)pw;
+                                             const char* user, const char* pw,
+                                             int timeout_ms) {
+  (void)host; (void)port; (void)user; (void)pw; (void)timeout_ms;
   return -1;
 }
 
@@ -65,6 +64,68 @@ EMSCRIPTEN_KEEPALIVE void ray_ipc_close(int64_t handle) { (void)handle; }
 EMSCRIPTEN_KEEPALIVE ray_t* ray_ipc_send(int64_t handle, ray_t* msg) {
   (void)handle; (void)msg;
   return ray_error("nyi", "IPC not available in WASM build");
+}
+
+EMSCRIPTEN_KEEPALIVE ray_err_t ray_ipc_send_async(int64_t handle, ray_t* msg) {
+  (void)handle; (void)msg;
+  return RAY_ERR_NYI;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* ray_ipc_send_verbose(int64_t handle, ray_t* msg) {
+  return ray_ipc_send(handle, msg);
+}
+
+EMSCRIPTEN_KEEPALIVE int64_t ray_ipc_current_handle(void) { return -1; }
+
+EMSCRIPTEN_KEEPALIVE int64_t ray_ipc_listen(ray_poll_t* poll, uint16_t port) {
+  (void)poll; (void)port;
+  return -1;
+}
+
+/* Journal replay shares IPC's delta/RLE decoder even when networking is
+ * unavailable, so keep the portable decoder in the WASM glue. */
+EMSCRIPTEN_KEEPALIVE size_t ray_ipc_decompress(const uint8_t* src, size_t clen,
+                                               uint8_t* dst, size_t dst_len) {
+  uint8_t* decoded = ray_sys_alloc(dst_len);
+  if (!decoded) return 0;
+
+  size_t si = 0;
+  size_t di = 0;
+  while (si < clen && di < dst_len) {
+    int8_t count = (int8_t)src[si++];
+    if (count > 0) {
+      if (si >= clen) { ray_sys_free(decoded); return 0; }
+      size_t n = (size_t)count;
+      if (di + n > dst_len) { ray_sys_free(decoded); return 0; }
+      memset(decoded + di, src[si++], n);
+      di += n;
+    } else {
+      size_t n = (size_t)(-(int)count);
+      if (si + n > clen || di + n > dst_len) {
+        ray_sys_free(decoded);
+        return 0;
+      }
+      memcpy(decoded + di, src + si, n);
+      si += n;
+      di += n;
+    }
+  }
+
+  if (di == 0) { ray_sys_free(decoded); return 0; }
+  dst[0] = decoded[0];
+  for (size_t i = 1; i < di; i++) dst[i] = (uint8_t)(decoded[i] + dst[i - 1]);
+  ray_sys_free(decoded);
+  return di;
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* ray_repl_connect_fn(ray_t* host_port_str) {
+  (void)host_port_str;
+  return ray_error("nyi", "remote REPL not available in WASM build");
+}
+
+EMSCRIPTEN_KEEPALIVE ray_t* ray_repl_disconnect_fn(ray_t** args, int64_t n) {
+  (void)args; (void)n;
+  return RAY_NULL_OBJ;
 }
 
 /* ANSI escapes for the boot banner. */
@@ -369,6 +430,26 @@ EMSCRIPTEN_KEEPALIVE const char* symbol_to_str(int64_t id) {
   memcpy(g_sym_to_str_buf, ray_str_ptr(s), n);
   g_sym_to_str_buf[n] = '\0';
   ray_release(s);
+  return g_sym_to_str_buf;
+}
+
+/* Resolve a symbol vector cell through the vector's own domain. CSV/splayed
+ * columns may use a file-local dictionary whose positions are not runtime
+ * symbol IDs. */
+EMSCRIPTEN_KEEPALIVE const char* symbol_vec_get(ray_t* vec, int64_t idx) {
+  if (!vec || ray_type(vec) != RAY_SYM || idx < 0 || idx >= ray_len(vec)) {
+    g_sym_to_str_buf[0] = '\0';
+    return g_sym_to_str_buf;
+  }
+  ray_t* s = ray_sym_vec_cell(vec, idx); /* borrowed from the domain */
+  if (!s) {
+    g_sym_to_str_buf[0] = '\0';
+    return g_sym_to_str_buf;
+  }
+  size_t n = ray_str_len(s);
+  if (n >= sizeof(g_sym_to_str_buf)) n = sizeof(g_sym_to_str_buf) - 1;
+  memcpy(g_sym_to_str_buf, ray_str_ptr(s), n);
+  g_sym_to_str_buf[n] = '\0';
   return g_sym_to_str_buf;
 }
 

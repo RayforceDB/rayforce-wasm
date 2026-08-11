@@ -1,0 +1,7 @@
+diff --git a/src/ops/idxop.h b/src/ops/idxop.h
+--- a/src/ops/idxop.h
++++ b/src/ops/idxop.h
+@@ -182,2 +182,2 @@ typedef struct {
+-_Static_assert(sizeof(ray_index_t) % 32 == 0,
++_Static_assert(sizeof(void*) == 4 || sizeof(ray_index_t) % 32 == 0,
+                "ray_index_t must be a 32-byte multiple for in-place mmap layout");

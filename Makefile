@@ -9,11 +9,15 @@
 # ============================================================================
 
 RAYFORCE_GITHUB = https://github.com/RayforceDB/rayforce.git
+# Pin production builds to a released engine tag. The upstream repository's
+# default branch is `dev`, so cloning without a ref can package unreleased code.
+RAYFORCE_REF ?= v2.5.13
 EXEC_DIR = $(shell pwd)
 BUILD_DIR = $(EXEC_DIR)/build
 DIST_DIR = $(EXEC_DIR)/dist
 SRC_DIR = $(EXEC_DIR)/src
 OBJ_DIR = $(BUILD_DIR)/obj
+RAYFORCE_PATCH = $(EXEC_DIR)/patches/rayforce-v2.5.13-wasm.patch
 
 # Rayforce source location: use RAYFORCE_SRC_DIR env var or default to ../rayforce
 # v2 layout: public umbrella header in include/, sources nested under src/{core,io,lang,mem,ops,store,table,vec}.
@@ -28,9 +32,27 @@ RAYFORCE_INC     = $(RAYFORCE_SRC_DIR)/include
 CC = emcc
 AR = emar
 STD = c17
+EMSCRIPTEN_VERSION ?= 6.0.6
 
-# Git hash for version info
-GIT_HASH := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+# Rayforce version/build metadata comes from the engine checkout, not this
+# wrapper repository.
+RAYFORCE_VERSION ?= $(shell git -C $(RAYFORCE_SRC_DIR) describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 2>/dev/null | sed 's/^v//')
+ifeq ($(strip $(RAYFORCE_VERSION)),)
+  RAYFORCE_VERSION := $(patsubst v%,%,$(RAYFORCE_REF))
+endif
+VERSION_MAJOR := $(word 1,$(subst ., ,$(RAYFORCE_VERSION)))
+VERSION_MINOR := $(word 2,$(subst ., ,$(RAYFORCE_VERSION)))
+VERSION_PATCH := $(word 3,$(subst ., ,$(RAYFORCE_VERSION)))
+RAYFORCE_GIT_COMMIT := $(shell git -C $(RAYFORCE_SRC_DIR) rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date -u +%Y-%m-%d)
+
+RAYFORCE_DEFS = \
+	-DRAYFORCE_GIT_COMMIT=\"$(RAYFORCE_GIT_COMMIT)\" \
+	-DRAYFORCE_BUILD_DATE=\"$(BUILD_DATE)\" \
+	-DRAY_VERSION_MAJOR=$(VERSION_MAJOR) \
+	-DRAY_VERSION_MINOR=$(VERSION_MINOR) \
+	-DRAY_VERSION_PATCH=$(VERSION_PATCH) \
+	-DRAYFORCE_VERSION=\"$(RAYFORCE_VERSION)\"
 
 # ============================================================================
 # WASM Compilation Flags
@@ -45,15 +67,13 @@ GIT_HASH := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 # -fassociative-math : Allow reassociation of FP operations
 # -ftree-vectorize   : Enable auto-vectorization
 # -fno-math-errno    : Don't set errno for math functions
-# -funsafe-math-optimizations : Aggressive FP optimizations
-# -ffinite-math-only : Assume no NaN/Inf
 # -funroll-loops     : Unroll loops for performance
 # -DSYS_MALLOC       : Use system malloc (required for WASM)
 
 WASM_CFLAGS = -fPIC -Wall -std=$(STD) -O3 -msimd128 \
 	-fassociative-math -ftree-vectorize -fno-math-errno \
-	-funsafe-math-optimizations -ffinite-math-only -funroll-loops \
-	-DSYS_MALLOC -DGIT_HASH=\"$(GIT_HASH)\"
+	-ffp-contract=fast -fno-signed-zeros -fno-trapping-math -funroll-loops \
+	-DSYS_MALLOC $(RAYFORCE_DEFS)
 
 # Debug flags for development
 # -g                 : Debug symbols
@@ -62,7 +82,7 @@ WASM_CFLAGS = -fPIC -Wall -std=$(STD) -O3 -msimd128 \
 # -DSYS_MALLOC       : Use system malloc
 
 DEBUG_CFLAGS = -fPIC -Wall -std=$(STD) -g -O0 -DDEBUG -DSYS_MALLOC \
-	-DGIT_HASH=\"$(GIT_HASH)\"
+	$(RAYFORCE_DEFS)
 
 # ============================================================================
 # Emscripten Linker Flags
@@ -75,6 +95,7 @@ DEBUG_CFLAGS = -fPIC -Wall -std=$(STD) -g -O0 -DDEBUG -DSYS_MALLOC \
 
 WASM_LDFLAGS = \
 	-s ALLOW_MEMORY_GROWTH=1 \
+	-s WASM_BIGINT=0 \
 	-s MODULARIZE=1 \
 	-s EXPORT_ES6=1 \
 	-s EXPORT_NAME="createRayforce" \
@@ -87,6 +108,7 @@ WASM_LDFLAGS = \
 
 DEBUG_LDFLAGS = \
 	-s ALLOW_MEMORY_GROWTH=1 \
+	-s WASM_BIGINT=0 \
 	-s MODULARIZE=1 \
 	-s EXPORT_ES6=1 \
 	-s EXPORT_NAME="createRayforce" \
@@ -169,6 +191,7 @@ EXPORTED_FUNCTIONS = [ \
 	'_read_timestamp', \
 	'_read_symbol_id', \
 	'_symbol_to_str', \
+	'_symbol_vec_get', \
 	'_str_atom_ptr', \
 	'_str_atom_len', \
 	'_str_vec_get', \
@@ -221,9 +244,7 @@ EXPORTED_RUNTIME_METHODS = [ \
 	'HEAPU16', \
 	'HEAPU32', \
 	'HEAPF32', \
-	'HEAPF64', \
-	'_malloc', \
-	'_free' \
+	'HEAPF64' \
 ]
 
 # ============================================================================
@@ -239,7 +260,7 @@ TARGET = rayforce
 #   - core/{epoll,iocp,kqueue,sock,poll}.c — platform-specific I/O multiplexing not relevant to WASM
 # Files in store/ that pull non-WASM mmap/io paths get added here on first linker error.
 EXCLUDE_CORE  = app/main.c app/repl.c app/term.c \
-                core/epoll.c core/iocp.c core/kqueue.c core/sock.c core/poll.c \
+                core/crash.c core/epoll.c core/iocp.c core/kqueue.c core/sock.c core/poll.c \
                 core/ipc.c
 ALL_CORE_SRCS = $(wildcard $(RAYFORCE_SRC)/*/*.c)
 CORE_SRCS     = $(filter-out $(addprefix $(RAYFORCE_SRC)/, $(EXCLUDE_CORE)), $(ALL_CORE_SRCS))
@@ -265,9 +286,10 @@ default: wasm
 # Pull rayforce sources from GitHub
 # Clone rayforce repo (for CI or fresh setup)
 pull:
-	@echo "⬇️  Cloning rayforce from GitHub..."
+	@echo "⬇️  Cloning rayforce $(RAYFORCE_REF) from GitHub..."
 	@rm -rf $(SRC_DIR)/rayforce-repo
-	@git clone --depth 1 $(RAYFORCE_GITHUB) $(SRC_DIR)/rayforce-repo
+	@git clone --depth 1 --branch $(RAYFORCE_REF) $(RAYFORCE_GITHUB) $(SRC_DIR)/rayforce-repo
+	@git -C $(SRC_DIR)/rayforce-repo apply $(RAYFORCE_PATCH)
 	@echo "✅ Rayforce cloned to $(SRC_DIR)/rayforce-repo"
 	@echo "   Build with: RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo make wasm"
 
@@ -278,6 +300,9 @@ pull:
 # Check if emcc is available
 check-emcc:
 	@which emcc > /dev/null || (echo "❌ Emscripten not found. Please install emsdk and run 'source emsdk_env.sh'" && exit 1)
+	@actual=$$(emcc --version | sed -n '1s/.* \([0-9][0-9.]*\).*/\1/p'); \
+		test "$$actual" = "$(EMSCRIPTEN_VERSION)" || \
+		(echo "❌ Emscripten $(EMSCRIPTEN_VERSION) required (found $$actual)" && exit 1)
 
 # Create build directories
 $(OBJ_DIR):
@@ -316,9 +341,10 @@ wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 	@cp $(SRC_DIR)/rayforce.sdk.js $(DIST_DIR)/rayforce.sdk.js
 	@cp $(SRC_DIR)/rayforce.umd.js $(DIST_DIR)/rayforce.umd.js
 	@cp $(SRC_DIR)/index.js $(DIST_DIR)/index.js
+	@cp $(SRC_DIR)/index.d.ts $(DIST_DIR)/index.d.ts
 	@cp $(SRC_DIR)/rayforce.sdk.d.ts $(DIST_DIR)/rayforce.sdk.d.ts
 	@echo "✅ WASM build complete: $(DIST_DIR)/$(TARGET).js"
-	@echo "✅ SDK files copied: rayforce.sdk.js, rayforce.umd.js, index.js, rayforce.sdk.d.ts"
+	@echo "✅ SDK files copied: rayforce.sdk.js, rayforce.umd.js, index.js, index.d.ts, rayforce.sdk.d.ts"
 
 # Build debug version with assertions and safety checks
 wasm-debug: CFLAGS = $(DEBUG_CFLAGS)
@@ -350,7 +376,7 @@ wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_
 # ============================================================================
 
 # Full build from GitHub
-app: pull
+app: check-emcc pull
 	RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo $(MAKE) wasm
 	@echo "🎉 Full build from GitHub complete!"
 
@@ -443,7 +469,8 @@ show-flags:
 	@echo "WASM_LDFLAGS:"
 	@echo "  $(WASM_LDFLAGS)"
 	@echo ""
-	@echo "GIT_HASH: $(GIT_HASH)"
+	@echo "RAYFORCE_VERSION: $(RAYFORCE_VERSION)"
+	@echo "RAYFORCE_GIT_COMMIT: $(RAYFORCE_GIT_COMMIT)"
 
 .PHONY: default pull check-emcc wasm wasm-debug wasm-standalone \
 	app dev serve test clean clean-all help show-sources show-flags

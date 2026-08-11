@@ -32,11 +32,17 @@ jobs:
           node-version: '24'
           package-manager-cache: false
 
+      - name: Install browser test dependency
+        run: npm install --ignore-scripts --no-package-lock
+
       - name: Build WASM package
         run: npm run build
 
       - name: Test runtime, declarations, and documented API
         run: npm test
+
+      - name: Test browser examples
+        run: npm run test:examples
 
       - name: Verify packaged SDK mirrors source
         run: |

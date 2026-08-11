@@ -35,7 +35,7 @@ console.log(vec.toJS()); // [100, 2, 3, 4, 5]
 
 ```html
 <script type="module">
-  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.1/dist/index.js';
 
   const rf = await init();
   console.log(rf.eval('(sum (til 100))').toJS()); // 4950

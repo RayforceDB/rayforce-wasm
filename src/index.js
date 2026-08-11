@@ -11,19 +11,19 @@
  * 
  * Usage (browser ES module):
  *   <script type="module">
- *     import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+ *     import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.1/dist/index.js';
  *     const rf = await init();
  *     console.log(rf.eval('(+ 1 2)').toJS());
  *   </script>
  * 
  * @module rayforce
- * @version 0.2.0
+ * @version 0.2.1
  */
 
 import { createRayforceSDK, Types, Expr } from './rayforce.sdk.js';
 
 // SDK version
-export const version = '0.2.0';
+export const version = '0.2.1';
 
 // Re-export types and utilities
 export { Types, Expr };

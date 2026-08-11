@@ -987,7 +987,7 @@
             <a href="https://rayforcedb.com/" class="nav-brand" title="RayforceDB">
                 <img src="assets/logo_light_full.svg" alt="RayforceDB" width="120" height="20">
             </a>
-            <span class="badge">SDK v0.2.0</span>
+            <span class="badge">SDK v0.2.1</span>
             <div class="nav-links">
                 <a href="https://rayforcedb.com/" target="_blank" rel="noopener">Home</a>
                 <a href="https://rayforcedb.com/docs/index.html" target="_blank" rel="noopener">Docs</a>
@@ -1512,8 +1512,13 @@ rf.eval('(max data)')   // 99</code></pre>
                     score: [95.5, 87.3, 92.1]
                 });
 
-                // Filter using toRows
-                const rows = table.toRows().filter(r => r.score > 90);
+                // Execute the same fluent query shown in the example above.
+                const result = table
+                    .select('name', 'score')
+                    .where(rf.col('score').gt(90))
+                    .execute();
+                if (result.isError) throw new Error(result.toString());
+                const rows = result.toRows();
 
                 resultDiv.innerHTML = `
                     <div style="margin-top: 1rem; padding: 1rem; background: var(--code-bg); border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem;">

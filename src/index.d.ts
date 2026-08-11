@@ -8,7 +8,7 @@ import type {
 
 export * from './rayforce.sdk.js';
 
-export declare const version: '0.2.0';
+export declare const version: '0.2.1';
 
 export interface InitOptions {
   /** URL/path to the Emscripten module loader. Defaults to ./rayforce.js. */

@@ -5,7 +5,7 @@
  * Provides TypedArray views over native Rayforce vectors for efficient data access.
  * 
  * @module rayforce
- * @version 0.2.0
+ * @version 0.2.1
  */
 
 // ============================================================================
@@ -642,6 +642,15 @@ class RayforceSDK {
    */
   typeName(typeCode) {
     return this._getTypeName(typeCode);
+  }
+
+  /**
+   * Create a column reference for the query builder.
+   * @param {string} name
+   * @returns {Expr}
+   */
+  col(name) {
+    return Expr.col(this, name);
   }
 }
 
@@ -1458,6 +1467,17 @@ class Lambda extends RayObject {
 // Query Builder
 // ============================================================================
 
+const RAYFALL_NAME = /^[A-Za-z0-9_.-]+$/;
+
+function assertRayfallName(name, role = 'column') {
+  if (typeof name !== 'string' || name.length === 0 || !RAYFALL_NAME.test(name)) {
+    throw new TypeError(
+      `${role} name must contain only letters, numbers, underscores, dots, or hyphens`,
+    );
+  }
+  return name;
+}
+
 /**
  * Expression builder for query conditions
  */
@@ -1473,12 +1493,14 @@ class Expr {
    * @returns {Expr}
    */
   static col(sdk, name) {
-    return new Expr(sdk, [`\`${name}`]);
+    // Rayforce v2 uses a leading apostrophe for a quoted symbol. Inside a
+    // query, quoted symbols resolve to columns just like bare names.
+    return new Expr(sdk, [`'${assertRayfallName(name)}`]);
   }
 
   // Comparison operators
-  eq(value) { return this._binOp('=', value); }
-  ne(value) { return this._binOp('<>', value); }
+  eq(value) { return this._binOp('==', value); }
+  ne(value) { return this._binOp('!=', value); }
   lt(value) { return this._binOp('<', value); }
   le(value) { return this._binOp('<=', value); }
   gt(value) { return this._binOp('>', value); }
@@ -1505,6 +1527,9 @@ class Expr {
   }
   
   _logicOp(op, other) {
+    if (!(other instanceof Expr)) {
+      throw new TypeError(`${op}() expects an Expr`);
+    }
     return new Expr(this._sdk, [`(${op}`, ...this._parts, ...other._parts, ')']);
   }
   
@@ -1542,6 +1567,10 @@ class SelectQuery {
    * @returns {SelectQuery}
    */
   select(...cols) {
+    for (const col of cols) {
+      if (typeof col === 'string') assertRayfallName(col);
+      else if (!(col instanceof Expr)) throw new TypeError('select() expects column names or Expr values');
+    }
     const q = this._clone();
     q._selectCols = cols;
     return q;
@@ -1554,6 +1583,8 @@ class SelectQuery {
    * @returns {SelectQuery}
    */
   withColumn(name, expr) {
+    assertRayfallName(name, 'output column');
+    if (!(expr instanceof Expr)) throw new TypeError('withColumn() expects an Expr');
     const q = this._clone();
     q._computedCols[name] = expr;
     return q;
@@ -1565,6 +1596,7 @@ class SelectQuery {
    * @returns {SelectQuery}
    */
   where(condition) {
+    if (!(condition instanceof Expr)) throw new TypeError('where() expects an Expr');
     const q = this._clone();
     q._whereCond = q._whereCond ? q._whereCond.and(condition) : condition;
     return q;
@@ -1576,6 +1608,7 @@ class SelectQuery {
    * @returns {SelectQuery}
    */
   groupBy(...cols) {
+    for (const col of cols) assertRayfallName(col, 'group-by column');
     const q = this._clone();
     q._byCols = cols;
     return q;

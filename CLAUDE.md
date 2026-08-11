@@ -115,7 +115,7 @@ console.log(table.toRows());
 
 ```html
 <script type="module">
-  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.0/dist/index.js';
+  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.1/dist/index.js';
   const rf = await init();
   const result = rf.eval('(sum (til 100))');
   console.log(result.toJS()); // 4950

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout rayforce-wasm
+        uses: actions/checkout@v7
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: '6.0.6'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Build WASM package
+        run: npm run build
+
+      - name: Test runtime, declarations, and documented API
+        run: npm test
+
+      - name: Verify packaged SDK mirrors source
+        run: |
+          cmp src/index.js dist/index.js
+          cmp src/index.d.ts dist/index.d.ts
+          cmp src/rayforce.sdk.js dist/rayforce.sdk.js
+          cmp src/rayforce.sdk.d.ts dist/rayforce.sdk.d.ts
+          cmp src/rayforce.umd.js dist/rayforce.umd.js
+
+      - name: Verify npm package payload
+        run: npm pack --dry-run --ignore-scripts

@@ -1,0 +1,42 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build, test, and publish
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout rayforce-wasm
+        uses: actions/checkout@v7
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: '6.0.6'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          package_version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+          test "$RELEASE_TAG" = "v$package_version"
+
+      - name: Publish package
+        run: npm publish

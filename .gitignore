@@ -2,6 +2,7 @@
 build/
 dist/
 src/rayforce/
+src/rayforce-repo/
 
 # Object files
 *.o
@@ -32,4 +33,3 @@ package-lock.json
 # Test artifacts
 coverage/
 .nyc_output/
-

@@ -1205,7 +1205,7 @@ class List extends RayObject {
   set(idx, value) {
     if (idx < 0) idx = this.length + idx;
     const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    this._ptr = this._sdk._vecSetIdx(this._ptr, idx, obj._ptr);
+    this._rebind(this._sdk._vecSetIdx(this._ptr, idx, obj._ptr), 'set');
   }
 
   /**
@@ -1214,7 +1214,24 @@ class List extends RayObject {
    */
   push(value) {
     const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    this._ptr = this._sdk._vecPush(this._ptr, obj._ptr);
+    this._rebind(this._sdk._vecPush(this._ptr, obj._ptr), 'push');
+  }
+
+  /**
+   * Adopt the pointer returned by a COW list op.  Rebinding unconditionally
+   * would let a failed op replace a live list with null or an error object,
+   * turning a binding fault into silent data loss — surface it instead.
+   * @param {number} ptr
+   * @param {string} op
+   */
+  _rebind(ptr, op) {
+    if (!ptr || this._sdk._isObjNull(ptr)) {
+      throw new Error(`List.${op}() failed: the engine returned null`);
+    }
+    if (this._sdk._isObjError(ptr)) {
+      throw new Error(`List.${op}() failed: ${this._sdk._getErrorMessage(ptr)}`);
+    }
+    this._ptr = ptr;
   }
 
   /**
@@ -1287,10 +1304,12 @@ class Dict extends RayObject {
     const vals = this.values();
     
     for (let i = 0; i < keys.length; i++) {
-      const keyStr = this._sdk._symbolToStr(Number(keys.at(i)));
-      result[keyStr] = vals.at(i).toJS();
+      // keys.at() already decodes SYM cells to strings via symbol_vec_get;
+      // re-wrapping in Number() gave NaN -> symbol_to_str(NaN) -> "", so every
+      // key collapsed to the same empty string and entries overwrote each other.
+      result[keys.at(i)] = vals.at(i).toJS();
     }
-    
+
     return result;
   }
 
@@ -1298,8 +1317,7 @@ class Dict extends RayObject {
     const keys = this.keys();
     const vals = this.values();
     for (let i = 0; i < keys.length; i++) {
-      const keyStr = this._sdk._symbolToStr(Number(keys.at(i)));
-      yield [keyStr, vals.at(i)];
+      yield [keys.at(i), vals.at(i)];
     }
   }
 }

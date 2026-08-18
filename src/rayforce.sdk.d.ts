@@ -482,7 +482,13 @@ export declare class RayforceSDK {
    * Set a global variable
    */
   set(name: string, value: RayObject | any): void;
-  
+
+  /**
+   * Delete a global binding, releasing the engine's ref to its value.
+   * Deleting an absent name is a no-op.
+   */
+  unset(name: string): void;
+
   /**
    * Get a global variable
    */

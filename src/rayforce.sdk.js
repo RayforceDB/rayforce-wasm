@@ -86,6 +86,21 @@ const TYPED_ARRAY_MAP = {
   [Types.SYM]: BigInt64Array,
 };
 
+// Keys in decoded objects come from user data (dict keys, column names), so a
+// plain `obj[key] = v` silently drops `__proto__`: it hits Object.prototype's
+// setter instead of creating an own property, and an object value would even
+// re-point the result's prototype.  defineProperty makes every key round-trip
+// as an own enumerable data property while keeping Object.prototype available
+// on the result (so `.hasOwnProperty`, spread and JSON.stringify behave).
+function setOwn(obj, key, value) {
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 // ============================================================================
 // Main SDK Class
 // ============================================================================
@@ -492,8 +507,15 @@ class RayforceSDK {
       keyView[i] = BigInt(this._internSymbol(keys[i], keys[i].length));
     }
 
-    const valList = this.list(Object.values(obj).map(v => this._toRayObject(v)));
-    return new Dict(this, this._initDict(keyVec._ptr, valList._ptr));
+    // Pass raw values: List.set converts and drops the temporaries itself.
+    const valList = this.list(Object.values(obj));
+    try {
+      // init_dict retains both sides, so our two wrappers are still ours.
+      return new Dict(this, this._initDict(keyVec._ptr, valList._ptr));
+    } finally {
+      valList.drop();
+      keyVec.drop();
+    }
   }
 
   /**
@@ -511,10 +533,21 @@ class RayforceSDK {
 
     const valList = this.list();
     for (const name of colNames) {
-      valList.push(this._arrayToVector(columns[name]));
+      const col = this._arrayToVector(columns[name]);
+      try {
+        valList.push(col);
+      } finally {
+        col.drop();  // the list holds its own ref now
+      }
     }
 
-    return new Table(this, this._initTable(keyVec._ptr, valList._ptr));
+    try {
+      // init_table retains every column it adopts; keys/vals stay ours.
+      return new Table(this, this._initTable(keyVec._ptr, valList._ptr));
+    } finally {
+      valList.drop();
+      keyVec.drop();
+    }
   }
 
   /**
@@ -541,8 +574,8 @@ class RayforceSDK {
     } else if (first instanceof Date) {
       type = Types.TIMESTAMP;
     } else {
-      // Default to list for mixed types
-      return this.list(arr.map(v => this._toRayObject(v)));
+      // Default to list for mixed types (List.set owns the conversions)
+      return this.list(arr);
     }
 
     const vec = this.vector(type, arr.length);
@@ -599,8 +632,42 @@ class RayforceSDK {
    */
   set(name, value) {
     const sym = this.symbol(name);
-    const val = value instanceof RayObject ? value : this._toRayObject(value);
-    this._globalSet(sym._ptr, val._ptr);
+    const temp = !(value instanceof RayObject);
+    const val = temp ? this._toRayObject(value) : value;
+    try {
+      // ray_env_set retains `val` into the binding, so both of our handles
+      // are still ours to drop.  The pointer global_set returns is borrowed
+      // from that binding — never wrap or drop it.
+      const ptr = this._globalSet(sym._ptr, val._ptr);
+      // A full env table (or a reserved name) comes back as an error block.
+      // Swallowing it turned a failed bind into a baffling "name undefined"
+      // from whatever read the binding next.
+      if (ptr && this._isObjError(ptr)) {
+        throw new Error(`set(${name}) failed: ${this._getErrorMessage(ptr)}`);
+      }
+    } finally {
+      if (temp) val.drop();
+      sym.drop();
+    }
+  }
+
+  /**
+   * Delete a global binding, releasing the engine's ref to its value.
+   * Deleting an absent name is a no-op.
+   * @param {string} name
+   */
+  unset(name) {
+    const sym = this.symbol(name);
+    try {
+      // global_set forwards a NULL value to ray_env_set, whose documented
+      // contract for NULL is "delete the slot and release its value".
+      const ptr = this._globalSet(sym._ptr, 0);
+      if (ptr && this._isObjError(ptr)) {
+        throw new Error(`unset(${name}) failed: ${this._getErrorMessage(ptr)}`);
+      }
+    } finally {
+      sym.drop();
+    }
   }
 
   /**
@@ -1204,8 +1271,15 @@ class List extends RayObject {
    */
   set(idx, value) {
     if (idx < 0) idx = this.length + idx;
-    const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    this._ptr = this._sdk._vecSetIdx(this._ptr, idx, obj._ptr);
+    const temp = !(value instanceof RayObject);
+    const obj = temp ? this._sdk._toRayObject(value) : value;
+    try {
+      this._rebind(this._sdk._vecSetIdx(this._ptr, idx, obj._ptr), 'set');
+    } finally {
+      // The list took its own ref; wrappers we minted here are ours to drop.
+      // Caller-supplied RayObjects stay owned by the caller.
+      if (temp) obj.drop();
+    }
   }
 
   /**
@@ -1213,8 +1287,30 @@ class List extends RayObject {
    * new) parent pointer returned by ray_list_append.
    */
   push(value) {
-    const obj = value instanceof RayObject ? value : this._sdk._toRayObject(value);
-    this._ptr = this._sdk._vecPush(this._ptr, obj._ptr);
+    const temp = !(value instanceof RayObject);
+    const obj = temp ? this._sdk._toRayObject(value) : value;
+    try {
+      this._rebind(this._sdk._vecPush(this._ptr, obj._ptr), 'push');
+    } finally {
+      if (temp) obj.drop();
+    }
+  }
+
+  /**
+   * Adopt the pointer returned by a COW list op.  Rebinding unconditionally
+   * would let a failed op replace a live list with null or an error object,
+   * turning a binding fault into silent data loss — surface it instead.
+   * @param {number} ptr
+   * @param {string} op
+   */
+  _rebind(ptr, op) {
+    if (!ptr || this._sdk._isObjNull(ptr)) {
+      throw new Error(`List.${op}() failed: the engine returned null`);
+    }
+    if (this._sdk._isObjError(ptr)) {
+      throw new Error(`List.${op}() failed: ${this._sdk._getErrorMessage(ptr)}`);
+    }
+    this._ptr = ptr;
   }
 
   /**
@@ -1224,11 +1320,19 @@ class List extends RayObject {
   toJS() {
     const result = [];
     for (let i = 0; i < this.length; i++) {
-      result.push(this.at(i).toJS());
+      // at() hands back an owned ref (vec_at_idx retains list slots and boxes
+      // everything else fresh); reading through it doesn't consume it.
+      const el = this.at(i);
+      try {
+        result.push(el.toJS());
+      } finally {
+        el.drop();
+      }
     }
     return result;
   }
 
+  // Yielded elements are owned handles and become the consumer's to drop.
   *[globalThis.Symbol.iterator]() {
     for (let i = 0; i < this.length; i++) {
       yield this.at(i);
@@ -1263,9 +1367,16 @@ class Dict extends RayObject {
    * @returns {RayObject}
    */
   get(key) {
-    const keyObj = typeof key === 'string' ? this._sdk.symbol(key) : key;
-    const ptr = this._sdk._dictGet(this._ptr, keyObj._ptr);
-    return this._sdk._wrapPtr(ptr);
+    const temp = typeof key === 'string';
+    const keyObj = temp ? this._sdk.symbol(key) : key;
+    try {
+      // ray_dict_get hands back an owned ref, so the wrapper we return owns
+      // it; the key we minted to look it up is a separate handle.
+      const ptr = this._sdk._dictGet(this._ptr, keyObj._ptr);
+      return this._sdk._wrapPtr(ptr);
+    } finally {
+      if (temp) keyObj.drop();
+    }
   }
 
   /**
@@ -1274,7 +1385,12 @@ class Dict extends RayObject {
    * @returns {boolean}
    */
   has(key) {
-    return !this.get(key).isNull;
+    const value = this.get(key);
+    try {
+      return !value.isNull;
+    } finally {
+      value.drop();  // get() returns an owned ref we never hand out
+    }
   }
 
   /**
@@ -1283,23 +1399,43 @@ class Dict extends RayObject {
    */
   toJS() {
     const result = {};
+    // keys()/values() go through dict_keys/dict_vals, which retain before
+    // handing the borrowed slot back — both wrappers are ours to drop.
     const keys = this.keys();
     const vals = this.values();
-    
-    for (let i = 0; i < keys.length; i++) {
-      const keyStr = this._sdk._symbolToStr(Number(keys.at(i)));
-      result[keyStr] = vals.at(i).toJS();
+
+    try {
+      for (let i = 0; i < keys.length; i++) {
+        const val = vals.at(i);
+        try {
+          // keys.at() already decodes SYM cells to strings via symbol_vec_get;
+          // re-wrapping in Number() gave NaN -> symbol_to_str(NaN) -> "", so every
+          // key collapsed to the same empty string and entries overwrote each other.
+          setOwn(result, keys.at(i), val.toJS());
+        } finally {
+          val.drop();
+        }
+      }
+    } finally {
+      vals.drop();
+      keys.drop();
     }
-    
+
     return result;
   }
 
+  // The yielded values are owned handles — the consumer drops those.  The
+  // finally still runs if the consumer abandons the loop early.
   *[globalThis.Symbol.iterator]() {
     const keys = this.keys();
     const vals = this.values();
-    for (let i = 0; i < keys.length; i++) {
-      const keyStr = this._sdk._symbolToStr(Number(keys.at(i)));
-      yield [keyStr, vals.at(i)];
+    try {
+      for (let i = 0; i < keys.length; i++) {
+        yield [keys.at(i), vals.at(i)];
+      }
+    } finally {
+      vals.drop();
+      keys.drop();
     }
   }
 }
@@ -1322,13 +1458,17 @@ class Table extends RayObject {
    * @returns {string[]}
    */
   columnNames() {
-    const cols = this.columns();
-    const names = [];
-    for (let i = 0; i < cols.length; i++) {
-      // at() already converts symbol IDs to strings
-      names.push(cols.at(i));
+    const cols = this.columns();  // table_keys builds a fresh sym vector
+    try {
+      const names = [];
+      for (let i = 0; i < cols.length; i++) {
+        // at() already converts symbol IDs to strings
+        names.push(cols.at(i));
+      }
+      return names;
+    } finally {
+      cols.drop();
     }
-    return names;
   }
 
   /**
@@ -1391,12 +1531,16 @@ class Table extends RayObject {
   insert(data) {
     let insertData;
     if (Array.isArray(data)) {
-      insertData = this._sdk.list(data.map(v => this._sdk._toRayObject(v)));
+      insertData = this._sdk.list(data);
     } else {
       insertData = this._sdk.dict(data);
     }
-    const newPtr = this._sdk._tableInsert(this._ptr, insertData._ptr);
-    return this._sdk._wrapPtr(newPtr);
+    try {
+      const newPtr = this._sdk._tableInsert(this._ptr, insertData._ptr);
+      return this._sdk._wrapPtr(newPtr);
+    } finally {
+      insertData.drop();
+    }
   }
 
   /**
@@ -1406,12 +1550,21 @@ class Table extends RayObject {
   toJS() {
     const result = {};
     const names = this.columnNames();
-    const vals = this.values();
-    
-    for (let i = 0; i < names.length; i++) {
-      result[names[i]] = vals.at(i).toJS();
+    const vals = this.values();  // table_vals builds a fresh owned list
+
+    try {
+      for (let i = 0; i < names.length; i++) {
+        const col = vals.at(i);
+        try {
+          setOwn(result, names[i], col.toJS());
+        } finally {
+          col.drop();
+        }
+      }
+    } finally {
+      vals.drop();
     }
-    
+
     return result;
   }
 
@@ -1423,19 +1576,28 @@ class Table extends RayObject {
     const names = this.columnNames();
     const count = this.rowCount;
     const rows = [];
-    
-    for (let i = 0; i < count; i++) {
-      const row = {};
-      for (const name of names) {
-        row[name] = this.col(name).at(i);
-        if (typeof row[name] === 'bigint') {
-          const n = Number(row[name]);
-          row[name] = Number.isSafeInteger(n) ? n : row[name];
+
+    // Each col() retains the column, so the old per-cell lookup leaked one
+    // ref per cell — and re-resolved the name rows × columns times.  Resolve
+    // each column once, read every row through it, then drop.
+    const cols = names.map(name => this.col(name));
+    try {
+      for (let i = 0; i < count; i++) {
+        const row = {};
+        for (let c = 0; c < names.length; c++) {
+          let cell = cols[c].at(i);
+          if (typeof cell === 'bigint') {
+            const n = Number(cell);
+            if (Number.isSafeInteger(n)) cell = n;
+          }
+          setOwn(row, names[c], cell);
         }
+        rows.push(row);
       }
-      rows.push(row);
+    } finally {
+      for (const col of cols) col.drop();
     }
-    
+
     return rows;
   }
 }
@@ -1628,16 +1790,29 @@ class SelectQuery {
    *
    * v2's ray_select_fn evaluates the dict body as an AST node — its `from:`
    * slot expects an unevaluated symbol/expression, not a raw ray_t* stuffed
-   * in as an i64 atom.  We bind the live table to a temporary global,
-   * render the query as a Rayfall string, eval, then leave the binding for
-   * the caller to clean up (eval's name resolution catches it).
+   * in as an i64 atom.  We bind the live table to a temporary global, render
+   * the query as a Rayfall string, eval, then unbind.
+   *
+   * The unbind is not optional: the global env is a fixed 1024-slot table, so
+   * abandoning one binding per query used to pin every queried table in memory
+   * and then fail outright — around the 700th call ray_env_set returned OOM
+   * and the next eval reported the freshly-made name as undefined.
    * @returns {Table|RayError}
    */
   execute() {
     const sdk = this._sdk;
     const tableSym = `__rfq_${++sdk._cmdCounter}`;
     sdk.set(tableSym, this._table);
+    try {
+      return this._run(tableSym);
+    } finally {
+      sdk.unset(tableSym);
+    }
+  }
 
+  /** @param {string} tableSym */
+  _run(tableSym) {
+    const sdk = this._sdk;
     const parts = [`from: ${tableSym}`];
 
     if (this._selectCols && this._selectCols.length) {

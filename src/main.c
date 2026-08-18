@@ -8,6 +8,7 @@
  */
 
 #include <emscripten.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -384,6 +385,36 @@ EMSCRIPTEN_KEEPALIVE int64_t get_data_byte_size(ray_t* obj) {
  * index reachable in a 4 GiB wasm32 heap.  Call sites in JS stay unchanged. */
 typedef double ray_jsidx_t;
 
+/* Values arriving as f64 are untrusted: JS (or a raw `_fill_i32_vec(p, d, -1)`
+ * probe) can hand us NaN, Infinity, a fraction or a negative.  Casting those
+ * straight to int64_t is undefined for NaN/Inf and, for a negative, yields a
+ * negative count whose byte size wraps to nearly UINT32_MAX once memcpy's
+ * 32-bit size_t truncates it on wasm32.  Narrow only after proving the value
+ * is finite, integral, non-negative and inside the exact-integer range of a
+ * double. */
+#define RAY_JSIDX_MAX 9007199254740991.0 /* 2^53 - 1 */
+
+static bool jsidx_to_i64(ray_jsidx_t v, int64_t* out) {
+  if (!isfinite(v) || v < 0.0 || v > RAY_JSIDX_MAX || v != floor(v)) return false;
+  *out = (int64_t)v;
+  return true;
+}
+
+/* String-length arguments cross the boundary as f64 as well.  Every JS call
+ * site marshals its argument through cwrap's 'string', which hands us a
+ * NUL-terminated copy, so we can do better than trusting the number: validate
+ * it, then clamp to the buffer's actual extent.  A bogus length then neither
+ * wraps the size_t cast nor reads past the copy. */
+static bool jsidx_to_strlen(const char* s, ray_jsidx_t len_f, size_t* out) {
+  int64_t n;
+  if (!s || !jsidx_to_i64(len_f, &n) || (uint64_t)n > (uint64_t)SIZE_MAX) return false;
+  /* Open-coded strnlen: that is POSIX, and this TU builds with -std=c17. */
+  size_t max = (size_t)n, i = 0;
+  while (i < max && s[i]) i++;
+  *out = i;
+  return true;
+}
+
 EMSCRIPTEN_KEEPALIVE ray_t* init_b8(bool val)             { return ray_bool(val); }
 EMSCRIPTEN_KEEPALIVE ray_t* init_u8(uint8_t val)          { return ray_u8(val); }
 EMSCRIPTEN_KEEPALIVE ray_t* init_i16(int16_t val)         { return ray_i16(val); }
@@ -396,11 +427,15 @@ EMSCRIPTEN_KEEPALIVE ray_t* init_time(int64_t ms)         { return ray_time(ms);
 EMSCRIPTEN_KEEPALIVE ray_t* init_timestamp(int64_t ns)    { return ray_timestamp(ns); }
 
 EMSCRIPTEN_KEEPALIVE ray_t* init_symbol_str(const char* s, ray_jsidx_t len) {
-  return ray_sym(ray_sym_intern(s, (size_t)len));
+  size_t n;
+  if (!jsidx_to_strlen(s, len, &n)) return ray_error("length", "init_symbol_str: invalid length");
+  return ray_sym(ray_sym_intern(s, n));
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* init_string_str(const char* s, ray_jsidx_t len) {
-  return ray_str(s, (size_t)len);
+  size_t n;
+  if (!jsidx_to_strlen(s, len, &n)) return ray_error("length", "init_string_str: invalid length");
+  return ray_str(s, n);
 }
 
 /* ============================================================================
@@ -435,8 +470,13 @@ EMSCRIPTEN_KEEPALIVE int64_t read_symbol_id(ray_t* obj) {
  * thread-local scratch buffer so the returned pointer survives until the
  * next call (Emscripten's UTF8ToString already copies on the JS side
  * before the next call lands). */
-EMSCRIPTEN_KEEPALIVE const char* symbol_to_str(ray_jsidx_t id) {
-  ray_t* s = ray_sym_str((int64_t)id);
+EMSCRIPTEN_KEEPALIVE const char* symbol_to_str(ray_jsidx_t id_f) {
+  int64_t id;
+  if (!jsidx_to_i64(id_f, &id)) {
+    g_sym_to_str_buf[0] = '\0';
+    return g_sym_to_str_buf;
+  }
+  ray_t* s = ray_sym_str(id);
   if (!s) {
     g_sym_to_str_buf[0] = '\0';
     return g_sym_to_str_buf;
@@ -453,8 +493,8 @@ EMSCRIPTEN_KEEPALIVE const char* symbol_to_str(ray_jsidx_t id) {
  * columns may use a file-local dictionary whose positions are not runtime
  * symbol IDs. */
 EMSCRIPTEN_KEEPALIVE const char* symbol_vec_get(ray_t* vec, ray_jsidx_t idx) {
-  int64_t i = (int64_t)idx;
-  if (!vec || ray_type(vec) != RAY_SYM || i < 0 || i >= ray_len(vec)) {
+  int64_t i;
+  if (!vec || ray_type(vec) != RAY_SYM || !jsidx_to_i64(idx, &i) || i >= ray_len(vec)) {
     g_sym_to_str_buf[0] = '\0';
     return g_sym_to_str_buf;
   }
@@ -485,12 +525,13 @@ EMSCRIPTEN_KEEPALIVE int64_t str_atom_len(ray_t* s) {
 /* Per-cell read of a RAY_STR vector.  Copies into a thread-local scratch
  * buffer; lifetime as for symbol_to_str. */
 EMSCRIPTEN_KEEPALIVE const char* str_vec_get(ray_t* vec, ray_jsidx_t idx) {
-  if (!vec) {
+  int64_t i;
+  if (!vec || !jsidx_to_i64(idx, &i)) {
     g_str_vec_buf[0] = '\0';
     return g_str_vec_buf;
   }
   size_t n = 0;
-  const char* p = ray_str_vec_get(vec, (int64_t)idx, &n);
+  const char* p = ray_str_vec_get(vec, i, &n);
   if (!p) {
     g_str_vec_buf[0] = '\0';
     return g_str_vec_buf;
@@ -512,14 +553,16 @@ EMSCRIPTEN_KEEPALIVE const char* str_vec_get(ray_t* vec, ray_jsidx_t idx) {
  * by setting v->len = capacity after allocation; data starts zero-filled
  * because mmap'd pages are zero-init. */
 EMSCRIPTEN_KEEPALIVE ray_t* init_vector(int8_t type, ray_jsidx_t len_f) {
-  int64_t len = (int64_t)len_f;
+  int64_t len;
+  if (!jsidx_to_i64(len_f, &len)) return ray_error("length", "init_vector: invalid length");
   ray_t* v = (type == RAY_SYM) ? ray_sym_vec_new(RAY_SYM_W64, len) : ray_vec_new(type, len);
   if (v && !RAY_IS_ERR(v)) v->len = len;
   return v;
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* init_list(ray_jsidx_t len_f) {
-  int64_t len = (int64_t)len_f;
+  int64_t len;
+  if (!jsidx_to_i64(len_f, &len)) return ray_error("length", "init_list: invalid length");
   ray_t* l = ray_list_new(len);
   if (l && !RAY_IS_ERR(l)) {
     /* Slots default to RAY_NULL_OBJ so iteration / drop is safe before
@@ -584,8 +627,9 @@ static ray_t* box_vec_element(int8_t vec_type, const void* p) {
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* vec_at_idx(ray_t* obj, ray_jsidx_t idx_f) {
-  int64_t idx = (int64_t)idx_f;
-  if (!obj) return RAY_NULL_OBJ;
+  int64_t idx;
+  /* An unusable index reads like an out-of-range one: RAY_NULL_OBJ. */
+  if (!obj || !jsidx_to_i64(idx_f, &idx)) return RAY_NULL_OBJ;
   int8_t t = ray_type(obj);
   if (t == RAY_LIST) {
     ray_t* item = ray_list_get(obj, idx);
@@ -602,11 +646,13 @@ EMSCRIPTEN_KEEPALIVE ray_t* vec_at_idx(ray_t* obj, ray_jsidx_t idx_f) {
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* vec_set_idx(ray_t* obj, ray_jsidx_t idx_f, ray_t* val) {
-  int64_t idx = (int64_t)idx_f;
+  int64_t idx;
   if (!obj || !val) return RAY_NULL_OBJ;
+  if (!jsidx_to_i64(idx_f, &idx)) return ray_error("index", "vec_set_idx: invalid index");
   int8_t t = ray_type(obj);
   if (t == RAY_LIST) {
-    ray_retain(val);
+    /* ray_list_set retains `val` itself — the caller's ref stays its own.
+     * Retaining here too would strand one ref per element. */
     return ray_list_set(obj, idx, val);
   }
   if (t == RAY_STR) {
@@ -622,7 +668,7 @@ EMSCRIPTEN_KEEPALIVE ray_t* vec_push(ray_t* obj, ray_t* val) {
   if (!obj || !val) return RAY_NULL_OBJ;
   int8_t t = ray_type(obj);
   if (t == RAY_LIST) {
-    ray_retain(val);
+    /* ray_list_append retains `val` itself — see vec_set_idx. */
     return ray_list_append(obj, val);
   }
   if (t == RAY_STR) {
@@ -635,11 +681,12 @@ EMSCRIPTEN_KEEPALIVE ray_t* vec_push(ray_t* obj, ray_t* val) {
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* vec_insert(ray_t* obj, ray_jsidx_t idx_f, ray_t* val) {
-  int64_t idx = (int64_t)idx_f;
+  int64_t idx;
   if (!obj || !val) return RAY_NULL_OBJ;
+  if (!jsidx_to_i64(idx_f, &idx)) return ray_error("index", "vec_insert: invalid index");
   int8_t t = ray_type(obj);
   if (t == RAY_LIST) {
-    ray_retain(val);
+    /* ray_list_insert_at retains `val` itself — see vec_set_idx. */
     return ray_list_insert_at(obj, idx, val);
   }
   if (t == RAY_STR) {
@@ -660,24 +707,27 @@ EMSCRIPTEN_KEEPALIVE ray_t* vec_insert(ray_t* obj, ray_jsidx_t idx_f, ray_t* val
  * ============================================================================ */
 
 EMSCRIPTEN_KEEPALIVE void fill_i64_vec(ray_t* obj, int64_t* data, ray_jsidx_t len_f) {
-  if (!obj || !data || obj->type != RAY_I64) return;
-  int64_t len = (int64_t)len_f;
+  int64_t len;
+  if (!obj || !data || obj->type != RAY_I64 || !jsidx_to_i64(len_f, &len)) return;
   int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
-  memcpy(ray_data(obj), data, copy_len * sizeof(int64_t));
+  if (copy_len <= 0) return;
+  memcpy(ray_data(obj), data, (size_t)copy_len * sizeof(int64_t));
 }
 
 EMSCRIPTEN_KEEPALIVE void fill_i32_vec(ray_t* obj, int32_t* data, ray_jsidx_t len_f) {
-  if (!obj || !data || obj->type != RAY_I32) return;
-  int64_t len = (int64_t)len_f;
+  int64_t len;
+  if (!obj || !data || obj->type != RAY_I32 || !jsidx_to_i64(len_f, &len)) return;
   int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
-  memcpy(ray_data(obj), data, copy_len * sizeof(int32_t));
+  if (copy_len <= 0) return;
+  memcpy(ray_data(obj), data, (size_t)copy_len * sizeof(int32_t));
 }
 
 EMSCRIPTEN_KEEPALIVE void fill_f64_vec(ray_t* obj, double* data, ray_jsidx_t len_f) {
-  if (!obj || !data || obj->type != RAY_F64) return;
-  int64_t len = (int64_t)len_f;
+  int64_t len;
+  if (!obj || !data || obj->type != RAY_F64 || !jsidx_to_i64(len_f, &len)) return;
   int64_t copy_len = len < ray_len(obj) ? len : ray_len(obj);
-  memcpy(ray_data(obj), data, copy_len * sizeof(double));
+  if (copy_len <= 0) return;
+  memcpy(ray_data(obj), data, (size_t)copy_len * sizeof(double));
 }
 
 /* ============================================================================
@@ -719,8 +769,8 @@ EMSCRIPTEN_KEEPALIVE ray_t* dict_get(ray_t* d, ray_t* key) {
  *
  * v2 builds tables column-by-column; init_table replays the v1 contract by
  * iterating the JS-supplied (sym-vec, list-of-cols) and chaining add_col.
- * Each col is retained once because ray_table_add_col → ray_list_append
- * consumes the ref.
+ * ray_table_add_col retains each col itself, so the caller's refs (held by
+ * the JS wrappers) survive the call untouched.
  * ============================================================================ */
 
 EMSCRIPTEN_KEEPALIVE ray_t* init_table(ray_t* keys, ray_t* vals) {
@@ -736,9 +786,10 @@ EMSCRIPTEN_KEEPALIVE ray_t* init_table(ray_t* keys, ray_t* vals) {
 
   int64_t* key_ids = (int64_t*)ray_data(keys);
   for (int64_t i = 0; i < n; i++) {
-    ray_t* col = ray_list_get(vals, i);
+    ray_t* col = ray_list_get(vals, i);  /* borrowed */
     if (!col) continue;
-    ray_retain(col);
+    /* ray_table_add_col retains col_vec itself; an extra retain here would
+     * strand one ref per column. */
     tbl = ray_table_add_col(tbl, key_ids[i], col);
     if (RAY_IS_ERR(tbl)) return tbl;
   }
@@ -762,15 +813,18 @@ EMSCRIPTEN_KEEPALIVE ray_t* table_vals(ray_t* t) {
   ray_t* lst = ray_list_new(n);
   for (int64_t i = 0; i < n; i++) {
     ray_t* col = ray_table_get_col_idx(t, i);  /* borrowed */
-    if (col) ray_retain(col);
+    /* ray_list_append takes the ref the returned list needs; retaining here
+     * too would strand one per column on every .values() call. */
     lst = ray_list_append(lst, col ? col : RAY_NULL_OBJ);
   }
   return lst;
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* table_col(ray_t* t, const char* name, ray_jsidx_t len) {
+  size_t n;
   if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
-  int64_t id = ray_sym_intern(name, (size_t)len);
+  if (!jsidx_to_strlen(name, len, &n)) return RAY_NULL_OBJ;
+  int64_t id = ray_sym_intern(name, n);
   ray_t* col = ray_table_get_col(t, id);  /* borrowed */
   if (col) ray_retain(col);
   return col ? col : RAY_NULL_OBJ;
@@ -778,7 +832,11 @@ EMSCRIPTEN_KEEPALIVE ray_t* table_col(ray_t* t, const char* name, ray_jsidx_t le
 
 /* Build a {col_name: col[idx]} dict for one row. */
 EMSCRIPTEN_KEEPALIVE ray_t* table_row(ray_t* t, ray_jsidx_t idx) {
+  int64_t row;
   if (!t || ray_type(t) != RAY_TABLE) return RAY_NULL_OBJ;
+  /* Checked here rather than left to vec_at_idx, so a bad index fails as a
+   * row instead of yielding a dict of nulls. */
+  if (!jsidx_to_i64(idx, &row)) return RAY_NULL_OBJ;
   int64_t n = ray_table_ncols(t);
   ray_t* keys = ray_sym_vec_new(RAY_SYM_W64, n);
   ray_t* vals = ray_list_new(n);
@@ -836,8 +894,11 @@ EMSCRIPTEN_KEEPALIVE ray_t* table_upsert(ray_t* t, ray_t* match_count, ray_t* da
  * Symbol / global env / type name
  * ============================================================================ */
 
+/* Returns -1 for an invalid length; interned IDs are non-negative slots. */
 EMSCRIPTEN_KEEPALIVE int64_t intern_symbol(const char* s, ray_jsidx_t len) {
-  return ray_sym_intern(s, (size_t)len);
+  size_t n;
+  if (!jsidx_to_strlen(s, len, &n)) return -1;
+  return ray_sym_intern(s, n);
 }
 
 EMSCRIPTEN_KEEPALIVE ray_t* global_set(ray_t* name, ray_t* val) {

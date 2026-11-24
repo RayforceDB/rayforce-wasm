@@ -21,7 +21,8 @@ ray_t* ray_ipc_send_timeout(int64_t h, ray_t* msg, int64_t timeout) {
 int ray_ipc_xport_policy_get(void) { return RAY_IPC_XPORT_TCP; }
 const char* ray_ipc_xport_policy_name(int p) { return p == RAY_IPC_XPORT_TCP ? "tcp" : NULL; }
 const char* ray_ipc_xport_kind_name(int kind) { (void)kind; return NULL; }
-size_t ray_ipc_handle_threshold(int64_t h) { (void)h; return RAY_IPC_COMPRESS_NEVER; }
+/* No browser handle resolves; match the native invalid-handle contract. */
+size_t ray_ipc_handle_threshold(int64_t h) { (void)h; return RAY_IPC_COMPRESS_AUTO; }
 ray_err_t ray_ipc_frame_async_at(ray_t* msg, size_t threshold, ray_poll_frame_t** out) {
     (void)msg; (void)threshold; *out = NULL; return RAY_ERR_NYI;
 }

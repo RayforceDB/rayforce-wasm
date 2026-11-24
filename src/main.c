@@ -52,7 +52,7 @@ extern ray_t*  ray_read_csv(const char* path);
  * IPC stubs
  *
  * src/core/ipc.c is excluded from the WASM build (uses select()/sockets).
- * src/ops/system.c still references these symbols, so provide weak stubs
+ * src/ops/system.c still references these symbols, so provide explicit stubs
  * that return "nyi" errors at runtime.  Browsers can't open raw TCP sockets
  * from WASM anyway — these would be unsuitable even if the engine code
  * compiled.

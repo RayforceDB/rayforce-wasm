@@ -18,7 +18,9 @@ nanosecond; `.value` is exact `bigint`. `.toJS()` returns `bigint` or `null`.
 `at()` and `toJS()` map the reserved `-9223372036854775808n` sentinel to `null`,
 while `typedArray` and `at(i, true)` expose the raw bits. Use `set()` for
 mutation: it maintains NULL hints, drops stale indexes and handles copy-on-write.
-Raw typed-array writes bypass those guarantees. Numeric constructor
+Raw typed-array writes bypass those guarantees. Cached typed-array views can also
+become invalid when WASM memory grows; this update does not repair the general
+SDK view-refresh behavior. Numeric constructor
 arguments must be safe integers; use bigint for larger exact counts.
 
 The WASM build does not provide native TCP/SHM/RDMA or native REPL completion.

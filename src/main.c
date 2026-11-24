@@ -1,5 +1,5 @@
 /*
- *   RayforceDB WASM Entry Point — v2 engine
+ *   RayforceDB WASM Entry Point — v3 engine
  *
  *   This file provides the main entry point and exported functions
  *   for the WebAssembly build of RayforceDB.
@@ -16,6 +16,12 @@
 #include <rayforce.h>
 #include "mem/sys.h"
 #include "table/sym.h"
+#include "ops/idxop.h"
+_Static_assert(sizeof(ray_t) == 32, "WASM value header must remain 32 bytes");
+_Static_assert(offsetof(ray_t, _idx_pad) == 8, "index padding must preserve aux high slot");
+_Static_assert(offsetof(ray_index_t, u) == 32, "index union offset changed");
+_Static_assert(sizeof(ray_index_t) == 96, "WASM index payload must reserve 96 bytes");
+
 
 /* Internal-engine functions we reach for WASM glue.  We declare them as
  * externs (rather than including the headers) because core/runtime.h and
@@ -46,7 +52,7 @@ extern ray_t*  ray_read_csv(const char* path);
  * IPC stubs
  *
  * src/core/ipc.c is excluded from the WASM build (uses select()/sockets).
- * src/ops/system.c still references these symbols, so provide weak stubs
+ * src/ops/system.c still references these symbols, so provide explicit stubs
  * that return "nyi" errors at runtime.  Browsers can't open raw TCP sockets
  * from WASM anyway — these would be unsuitable even if the engine code
  * compiled.
@@ -240,6 +246,7 @@ EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_F64(void)       { return RAY_F64; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_DATE(void)      { return RAY_DATE; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TIME(void)      { return RAY_TIME; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TIMESTAMP(void) { return RAY_TIMESTAMP; }
+EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_TIMESPAN(void)  { return RAY_TIMESPAN; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_GUID(void)      { return RAY_GUID; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_SYM(void)       { return RAY_SYM; }
 EMSCRIPTEN_KEEPALIVE int32_t TYPE_CODE_STR(void)       { return RAY_STR; }
@@ -378,6 +385,50 @@ EMSCRIPTEN_KEEPALIVE ray_t* init_f64(double val)          { return ray_f64(val);
 EMSCRIPTEN_KEEPALIVE ray_t* init_date(int64_t days)       { return ray_date(days); }
 EMSCRIPTEN_KEEPALIVE ray_t* init_time(int64_t ms)         { return ray_time(ms); }
 EMSCRIPTEN_KEEPALIVE ray_t* init_timestamp(int64_t ns)    { return ray_timestamp(ns); }
+
+/* Keep signed nanoseconds exact across Emscripten's legalized i64 ABI. */
+EMSCRIPTEN_KEEPALIVE ray_t* init_timespan_parts(uint32_t lo, int32_t hi) {
+  uint64_t bits = ((uint64_t)(uint32_t)hi << 32) | lo;
+  int64_t ns;
+  memcpy(&ns, &bits, sizeof(ns));
+  /* The released core's atom constructor dereferences a NULL allocation.
+   * Keep allocation failure at this new bridge boundary, not in JS payload. */
+  ray_t* out = ray_alloc(0);
+  if (!out) return NULL;
+  if (RAY_IS_ERR(out)) { ray_error_free(out); return NULL; }
+  out->type = -RAY_TIMESPAN;
+  out->i64 = ns;
+  return out;
+}
+/* Fresh constructor vectors have no aliases or indexes yet. JS observed the
+ * sentinel during its fill loop; publish the hint once, without a second scan. */
+EMSCRIPTEN_KEEPALIVE void timespan_vec_mark_nulls(ray_t* vec) {
+  if (vec && vec->type == RAY_TIMESPAN) vec->attrs |= RAY_ATTR_HAS_NULLS;
+}
+/* ray_vec_set preserves the old owned reference on allocation failure, and
+ * consumes it on a successful COW. Use int32 index/parts to avoid legalized
+ * i64 parameter shifting. Numeric vec_set needs explicit sentinel publication. */
+EMSCRIPTEN_KEEPALIVE ray_t* timespan_vec_set_parts(ray_t* vec, int32_t idx,
+                                                   uint32_t lo, int32_t hi) {
+  if (!vec || vec->type != RAY_TIMESPAN || idx < 0 || idx >= vec->len) return NULL;
+  uint64_t bits = ((uint64_t)(uint32_t)hi << 32) | lo;
+  int64_t ns;
+  memcpy(&ns, &bits, sizeof(ns));
+  ray_t* out = ray_vec_set(vec, idx, &ns);
+  if (RAY_IS_ERR(out)) { ray_error_free(out); return NULL; }
+  if (out && ns == NULL_I64) out->attrs |= RAY_ATTR_HAS_NULLS;
+  return out;
+}
+EMSCRIPTEN_KEEPALIVE uint32_t read_timespan_lo(ray_t* obj) {
+  return obj ? (uint32_t)(uint64_t)obj->i64 : 0;
+}
+EMSCRIPTEN_KEEPALIVE int32_t read_timespan_hi(ray_t* obj) {
+  uint32_t bits = obj ? (uint32_t)((uint64_t)obj->i64 >> 32) : 0;
+  int32_t hi;
+  memcpy(&hi, &bits, sizeof(hi));
+  return hi;
+}
+
 
 EMSCRIPTEN_KEEPALIVE ray_t* init_symbol_str(const char* s, int64_t len) {
   return ray_sym(ray_sym_intern(s, (size_t)len));
@@ -531,7 +582,7 @@ static const void* scalar_addr(ray_t* atom, int8_t target_type) {
     case RAY_I16:                       return &atom->i16;
     case RAY_I32:                       return &atom->i32;
     case RAY_I64: case RAY_DATE:
-    case RAY_TIME: case RAY_TIMESTAMP:
+    case RAY_TIME: case RAY_TIMESTAMP: case RAY_TIMESPAN:
     case RAY_SYM:                       return &atom->i64;
     case RAY_F32: {
       static _Thread_local float f;     /* narrow once into a stable slot */
@@ -558,6 +609,7 @@ static ray_t* box_vec_element(int8_t vec_type, const void* p) {
     case RAY_DATE:      return ray_date(*(const int32_t*)p);
     case RAY_TIME:      return ray_time(*(const int32_t*)p);
     case RAY_TIMESTAMP: return ray_timestamp(*(const int64_t*)p);
+    case RAY_TIMESPAN:  return ray_timespan(*(const int64_t*)p);
     case RAY_SYM:       return ray_sym(*(const int64_t*)p);
     case RAY_GUID:      return ray_guid((const uint8_t*)p);
     default:            return RAY_NULL_OBJ;

@@ -115,7 +115,7 @@ console.log(table.toRows());
 
 ```html
 <script type="module">
-  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.2.1/dist/index.js';
+  import { init } from 'https://cdn.jsdelivr.net/npm/rayforce-wasm@0.3.0/dist/index.js';
   const rf = await init();
   const result = rf.eval('(sum (til 100))');
   console.log(result.toJS()); // 4950
@@ -139,6 +139,7 @@ console.log(table.toRows());
 | DATE | 8 | Int32Array | Days since 2000-01-01 |
 | TIME | 9 | Int32Array | Milliseconds since midnight |
 | TIMESTAMP | 10 | BigInt64Array | Nanoseconds since 2000-01-01 |
+| TIMESPAN | 16 | BigInt64Array | Signed nanoseconds; INT64_MIN is NULL |
 | GUID | 11 | - | 128-bit UUID |
 | SYM | 12 | BigInt64Array | Interned dictionary-encoded string column |
 | STR | 13 | - | Variable-length string (atom or column) |

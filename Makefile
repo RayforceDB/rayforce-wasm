@@ -11,17 +11,18 @@
 RAYFORCE_GITHUB = https://github.com/RayforceDB/rayforce.git
 # Pin production builds to a released engine tag. The upstream repository's
 # default branch is `dev`, so cloning without a ref can package unreleased code.
-RAYFORCE_REF ?= v2.5.13
+RAYFORCE_REF ?= v3.0.2
+RAYFORCE_COMMIT ?= d5a44cdb4ec33772104f466a2ca177a74b528041
 EXEC_DIR = $(shell pwd)
 BUILD_DIR = $(EXEC_DIR)/build
 DIST_DIR = $(EXEC_DIR)/dist
 SRC_DIR = $(EXEC_DIR)/src
 OBJ_DIR = $(BUILD_DIR)/obj
-RAYFORCE_PATCH = $(EXEC_DIR)/patches/rayforce-v2.5.13-wasm.patch
+RAYFORCE_PATCH = $(EXEC_DIR)/patches/rayforce-v3.0.2-wasm.patch
 
-# Rayforce source location: use RAYFORCE_SRC_DIR env var or default to ../rayforce
-# v2 layout: public umbrella header in include/, sources nested under src/{core,io,lang,mem,ops,store,table,vec}.
-RAYFORCE_SRC_DIR ?= ../rayforce
+# Use the pinned nested checkout by default; external source requires an explicit override.
+# Core layout: public umbrella header in include/, sources nested under src/{core,io,lang,mem,ops,store,table,vec}.
+RAYFORCE_SRC_DIR ?= $(SRC_DIR)/rayforce-repo
 RAYFORCE_SRC     = $(RAYFORCE_SRC_DIR)/src
 RAYFORCE_INC     = $(RAYFORCE_SRC_DIR)/include
 
@@ -40,9 +41,11 @@ RAYFORCE_VERSION ?= $(shell git -C $(RAYFORCE_SRC_DIR) describe --tags --match '
 ifeq ($(strip $(RAYFORCE_VERSION)),)
   RAYFORCE_VERSION := $(patsubst v%,%,$(RAYFORCE_REF))
 endif
-VERSION_MAJOR := $(word 1,$(subst ., ,$(RAYFORCE_VERSION)))
-VERSION_MINOR := $(word 2,$(subst ., ,$(RAYFORCE_VERSION)))
-VERSION_PATCH := $(word 3,$(subst ., ,$(RAYFORCE_VERSION)))
+# Keep numeric C macros valid when an explicitly selected preview has a suffix.
+VERSION_NUMERIC := $(firstword $(subst -, ,$(RAYFORCE_VERSION)))
+VERSION_MAJOR := $(word 1,$(subst ., ,$(VERSION_NUMERIC)))
+VERSION_MINOR := $(word 2,$(subst ., ,$(VERSION_NUMERIC)))
+VERSION_PATCH := $(word 3,$(subst ., ,$(VERSION_NUMERIC)))
 RAYFORCE_GIT_COMMIT := $(shell git -C $(RAYFORCE_SRC_DIR) rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +%Y-%m-%d)
 
@@ -74,6 +77,9 @@ WASM_CFLAGS = -fPIC -Wall -std=$(STD) -O3 -msimd128 \
 	-fassociative-math -ftree-vectorize -fno-math-errno \
 	-ffp-contract=fast -fno-signed-zeros -fno-trapping-math -funroll-loops \
 	-DSYS_MALLOC $(RAYFORCE_DEFS)
+
+# Match the core codec's strict arithmetic even in the optimized WASM build.
+FP_STRICT_store/enc_alp = -fno-fast-math -fno-unsafe-math-optimizations -fno-associative-math -fno-reciprocal-math -fsigned-zeros -ffp-contract=off
 
 # Debug flags for development
 # -g                 : Debug symbols
@@ -145,6 +151,7 @@ EXPORTED_FUNCTIONS = [ \
 	'_TYPE_CODE_DATE', \
 	'_TYPE_CODE_TIME', \
 	'_TYPE_CODE_TIMESTAMP', \
+	'_TYPE_CODE_TIMESPAN', \
 	'_TYPE_CODE_GUID', \
 	'_TYPE_CODE_SYM', \
 	'_TYPE_CODE_STR', \
@@ -177,6 +184,11 @@ EXPORTED_FUNCTIONS = [ \
 	'_init_date', \
 	'_init_time', \
 	'_init_timestamp', \
+	'_init_timespan_parts', \
+	'_timespan_vec_mark_nulls', \
+	'_timespan_vec_set_parts', \
+	'_read_timespan_lo', \
+	'_read_timespan_hi', \
 	'_init_symbol_str', \
 	'_init_string_str', \
 	'_read_b8', \
@@ -271,7 +283,8 @@ WASM_MAIN = $(SRC_DIR)/main.c
 WASM_MAIN_OBJ = $(OBJ_DIR)/main.o
 
 # All objects for linking
-ALL_OBJS = $(CORE_OBJS) $(WASM_MAIN_OBJ)
+WASM_PLATFORM_OBJ = $(OBJ_DIR)/platform-stubs.o
+ALL_OBJS = $(CORE_OBJS) $(WASM_MAIN_OBJ) $(WASM_PLATFORM_OBJ)
 
 # ============================================================================
 # Default Target
@@ -286,9 +299,14 @@ default: wasm
 # Pull rayforce sources from GitHub
 # Clone rayforce repo (for CI or fresh setup)
 pull:
-	@echo "⬇️  Cloning rayforce $(RAYFORCE_REF) from GitHub..."
+	@echo "⬇️  Fetching rayforce $(RAYFORCE_REF), exact commit $(RAYFORCE_COMMIT)..."
+	@test ! -f $(SRC_DIR)/rayforce-repo/.git || (echo "❌ refusing to replace a linked core worktree"; exit 1)
 	@rm -rf $(SRC_DIR)/rayforce-repo
-	@git clone --depth 1 --branch $(RAYFORCE_REF) $(RAYFORCE_GITHUB) $(SRC_DIR)/rayforce-repo
+	@git init -q $(SRC_DIR)/rayforce-repo
+	@git -C $(SRC_DIR)/rayforce-repo remote add origin $(RAYFORCE_GITHUB)
+	@git -C $(SRC_DIR)/rayforce-repo fetch --depth 1 origin $(RAYFORCE_COMMIT)
+	@git -C $(SRC_DIR)/rayforce-repo checkout -q --detach FETCH_HEAD
+	@test "$$(git -C $(SRC_DIR)/rayforce-repo rev-parse HEAD)" = "$(RAYFORCE_COMMIT)" || (echo "❌ core checkout does not match RAYFORCE_COMMIT"; exit 1)
 	@git -C $(SRC_DIR)/rayforce-repo apply $(RAYFORCE_PATCH)
 	@echo "✅ Rayforce cloned to $(SRC_DIR)/rayforce-repo"
 	@echo "   Build with: RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo make wasm"
@@ -315,10 +333,13 @@ $(DIST_DIR):
 # obj/lang/eval.o), so the recipe creates the parent dir on demand.
 $(OBJ_DIR)/%.o: $(RAYFORCE_SRC)/%.c | $(OBJ_DIR)
 	@mkdir -p $(@D)
-	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
+	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) $(FP_STRICT_$*) -o $@
 
 # Compile WASM main entry point
 $(WASM_MAIN_OBJ): $(WASM_MAIN) | $(OBJ_DIR)
+	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
+
+$(WASM_PLATFORM_OBJ): $(SRC_DIR)/platform-stubs.c | $(OBJ_DIR)
 	$(CC) -I$(RAYFORCE_INC) -I$(RAYFORCE_SRC) -c $< $(CFLAGS) -o $@
 
 # Build static library
@@ -331,7 +352,7 @@ $(BUILD_DIR)/lib$(TARGET).a: $(CORE_OBJS)
 
 # Build optimized WASM release with SDK
 wasm: CFLAGS = $(WASM_CFLAGS)
-wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
+wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ) $(WASM_PLATFORM_OBJ)
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET).js \
 		$(ALL_OBJS) \
 		-s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" \
@@ -348,7 +369,7 @@ wasm: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 
 # Build debug version with assertions and safety checks
 wasm-debug: CFLAGS = $(DEBUG_CFLAGS)
-wasm-debug: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
+wasm-debug: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ) $(WASM_PLATFORM_OBJ)
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET)-debug.js \
 		$(ALL_OBJS) \
 		-s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" \
@@ -359,7 +380,7 @@ wasm-debug: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
 
 # Build with preloaded examples (standalone version)
 wasm-standalone: CFLAGS = $(WASM_CFLAGS)
-wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ)
+wasm-standalone: check-emcc $(DIST_DIR) $(BUILD_DIR)/lib$(TARGET).a $(WASM_MAIN_OBJ) $(WASM_PLATFORM_OBJ)
 	@mkdir -p $(BUILD_DIR)/examples
 	@cp -r $(RAYFORCE_SRC_DIR)/examples/* $(BUILD_DIR)/examples/ 2>/dev/null || true
 	$(CC) -I$(SRC_DIR) $(CFLAGS) -o $(DIST_DIR)/$(TARGET)-standalone.js \

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { init, version, Types } from './dist/index.js';
 
-assert.equal(version, '0.2.1');
+assert.equal(version, '0.3.0');
 
 const rf = await init({ singleton: false });
-assert.equal(rf.version, '2.5.13');
+assert.equal(rf.version, '3.0.2');
 assert.equal(rf.eval('(+ (+ 1 2) 3)').toJS(), 6);
 assert.deepEqual(rf.eval('(til 5)').toJS(), [0, 1, 2, 3, 4]);
 
@@ -110,8 +110,9 @@ assert.deepEqual(
     .execute()
     .toRows()
     .map(({ name }) => name),
-  ['Bob', 'Carol'],
+  ['Bob'],
 );
+assert.deepEqual(rf.eval('(or [false true false] (not [true false true]))').toJS(), [0, 1, 0]);
 assert.throws(() => rf.col('score) injected'), /column name/);
 
 const error = rf.eval('(+ 1)');

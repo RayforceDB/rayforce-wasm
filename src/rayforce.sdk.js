@@ -5,7 +5,7 @@
  * Provides TypedArray views over native Rayforce vectors for efficient data access.
  * 
  * @module rayforce
- * @version 0.2.1
+ * @version 0.3.0
  */
 
 // ============================================================================
@@ -43,6 +43,7 @@ export const Types = Object.freeze({
   GUID: 11,
   SYM: 12,
   STR: 13,
+  TIMESPAN: 16,
   TABLE: 98,
   DICT: 99,
   LAMBDA: 100,
@@ -66,6 +67,7 @@ const ELEMENT_SIZES = {
   [Types.DATE]: 4,
   [Types.TIME]: 4,
   [Types.TIMESTAMP]: 8,
+  [Types.TIMESPAN]: 8,
   [Types.SYM]: 8,
   [Types.GUID]: 16,
   [Types.LIST]: 4, // pointer size in WASM32
@@ -83,12 +85,24 @@ const TYPED_ARRAY_MAP = {
   [Types.DATE]: Int32Array,
   [Types.TIME]: Int32Array,
   [Types.TIMESTAMP]: BigInt64Array,
+  [Types.TIMESPAN]: BigInt64Array,
   [Types.SYM]: BigInt64Array,
 };
 
 // ============================================================================
 // Main SDK Class
 // ============================================================================
+
+const TIMESPAN_NULL = -(1n << 63n);
+function timespanBits(value) {
+  if (value === null) return TIMESPAN_NULL;
+  if (typeof value !== 'bigint' && (typeof value !== 'number' || !Number.isSafeInteger(value))) {
+    throw new TypeError('TIMESPAN requires bigint or a safe integer nanosecond count');
+  }
+  const ns = BigInt(value);
+  if (ns < TIMESPAN_NULL || ns > (1n << 63n) - 1n) throw new RangeError('TIMESPAN outside signed 64-bit range');
+  return ns;
+}
 
 class RayforceSDK {
   constructor(wasm) {
@@ -139,6 +153,11 @@ class RayforceSDK {
     this._initDate       = w.cwrap('init_date',        'number', ['number']);
     this._initTime       = w.cwrap('init_time',        'number', ['number']);
     this._initTimestamp  = w.cwrap('init_timestamp',   'number', ['number']);
+    this._initTimespanParts = w.cwrap('init_timespan_parts', 'number', ['number', 'number']);
+    this._readTimespanLo = w.cwrap('read_timespan_lo', 'number', ['number']);
+    this._readTimespanHi = w.cwrap('read_timespan_hi', 'number', ['number']);
+    this._timespanVecMarkNulls = w.cwrap('timespan_vec_mark_nulls', null, ['number']);
+    this._timespanVecSetParts = w.cwrap('timespan_vec_set_parts', 'number', ['number', 'number', 'number', 'number']);
     this._initSymbolStr  = w.cwrap('init_symbol_str',  'number', ['string', 'number']);
     this._initStringStr  = w.cwrap('init_string_str',  'number', ['string', 'number']);
 
@@ -280,6 +299,7 @@ class RayforceSDK {
         case Types.DATE:      return new RayDate(this, ptr);
         case Types.TIME:      return new RayTime(this, ptr);
         case Types.TIMESTAMP: return new RayTimestamp(this, ptr);
+        case Types.TIMESPAN:  return new RayTimespan(this, ptr);
         case Types.SYM:       return new Sym(this, ptr);
         case Types.STR:       return new RayString(this, ptr);
         case Types.GUID:      return new GUID(this, ptr);
@@ -403,9 +423,17 @@ class RayforceSDK {
     return new RayTime(this, this._initTime(ms));
   }
 
+  /** Signed nanoseconds, with INT64_MIN reserved for NULL. */
+  timespan(value) {
+    const ns = timespanBits(value);
+    const ptr = this._initTimespanParts(Number(ns & 0xffffffffn), Number(BigInt.asIntN(32, ns >> 32n)));
+    if (!ptr) throw new Error('Failed to allocate TIMESPAN atom');
+    return new RayTimespan(this, ptr);
+  }
+
   /**
-   * Create a timestamp (nanoseconds since 2000-01-01)
-   * @param {number|bigint|Date} value - Nanoseconds or JS Date
+   * Create a timestamp (nanoseconds since 2000-01-01).
+   * @param {number|bigint|Date} value
    * @returns {RayTimestamp}
    */
   timestamp(value) {
@@ -445,19 +473,24 @@ class RayforceSDK {
    */
   vector(type, lengthOrData) {
     if (Array.isArray(lengthOrData)) {
-      const arr = lengthOrData;
+      const arr = type === Types.TIMESPAN ? lengthOrData.map(timespanBits) : lengthOrData;
       // v2 vectors are growable; init_vector takes a capacity hint, then
       // each push appends.  For typed numeric vectors we still allocate
       // up-front and write through the typed-array view for speed.
       const vec = new Vector(this, this._initVector(type, arr.length), type);
       const view = vec.typedArray;
+      let hasTimespanNull = false;
       for (let i = 0; i < arr.length; i++) {
-        if (type === Types.I64 || type === Types.TIMESTAMP || type === Types.SYM) {
+        if (type === Types.TIMESPAN) {
+          view[i] = arr[i];
+          hasTimespanNull ||= arr[i] === TIMESPAN_NULL;
+        } else if (type === Types.I64 || type === Types.TIMESTAMP || type === Types.SYM) {
           view[i] = BigInt(type === Types.SYM ? this._internSymbol(arr[i], arr[i].length) : arr[i]);
         } else {
           view[i] = arr[i];
         }
       }
+      if (hasTimespanNull) this._timespanVecMarkNulls(vec.ptr);
       return vec;
     }
     return new Vector(this, this._initVector(type, lengthOrData), type);
@@ -930,6 +963,16 @@ class RayTimestamp extends RayObject {
   }
 }
 
+class RayTimespan extends RayObject {
+  static typeCode = -Types.TIMESPAN;
+  get value() {
+    return (BigInt(this._sdk._readTimespanHi(this._ptr)) << 32n) |
+      BigInt(this._sdk._readTimespanLo(this._ptr) >>> 0);
+  }
+  get isNull() { return this.value === TIMESPAN_NULL; }
+  toJS() { const ns = this.value; return ns === TIMESPAN_NULL ? null : ns; }
+}
+
 class Sym extends RayObject {
   static typeCode = -Types.SYM;
 
@@ -1063,6 +1106,7 @@ class Vector extends RayObject {
       throw new RangeError(`Index ${idx} out of bounds [0, ${this.length})`);
     }
     const val = this.typedArray[idx];
+    if (!raw && this._elementType === Types.TIMESPAN) return val === TIMESPAN_NULL ? null : val;
     
     // Convert symbol IDs to strings
     if (!raw && this._elementType === Types.SYM) {
@@ -1088,6 +1132,16 @@ class Vector extends RayObject {
     if (idx < 0 || idx >= this.length) {
       throw new RangeError(`Index ${idx} out of bounds [0, ${this.length})`);
     }
+    if (this._elementType === Types.TIMESPAN) {
+      if (!Number.isInteger(idx)) throw new RangeError('Vector index must be an integer');
+      const ns = timespanBits(value);
+      const next = this._sdk._timespanVecSetParts(this._ptr, idx,
+        Number(ns & 0xffffffffn), Number(BigInt.asIntN(32, ns >> 32n)));
+      if (!next) throw new Error('TIMESPAN vector update allocation failed');
+      this._ptr = next;
+      this._typedArray = null;
+      return;
+    }
     this.typedArray[idx] = value;
   }
 
@@ -1097,6 +1151,7 @@ class Vector extends RayObject {
    */
   toJS() {
     const arr = Array.from(this.typedArray);
+    if (this._elementType === Types.TIMESPAN) return arr.map(v => v === TIMESPAN_NULL ? null : v);
     
     // Convert BigInt to Number for I64 types if safe
     if (this._elementType === Types.I64 ||
@@ -1427,8 +1482,9 @@ class Table extends RayObject {
     for (let i = 0; i < count; i++) {
       const row = {};
       for (const name of names) {
-        row[name] = this.col(name).at(i);
-        if (typeof row[name] === 'bigint') {
+        const column = this.col(name);
+        row[name] = column.at(i);
+        if (typeof row[name] === 'bigint' && column.elementType !== Types.TIMESPAN) {
           const n = Number(row[name]);
           row[name] = Number.isSafeInteger(n) ? n : row[name];
         }
@@ -1679,7 +1735,7 @@ export {
   RayNull,
   RayError,
   B8, U8, I16, I32, I64, F32, F64,
-  RayDate, RayTime, RayTimestamp,
+  RayDate, RayTime, RayTimestamp, RayTimespan,
   Sym, GUID,
   Vector, RayString, StrVector, List, Dict, Table, Lambda,
   Expr, SelectQuery,

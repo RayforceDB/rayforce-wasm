@@ -426,7 +426,9 @@ class RayforceSDK {
   /** Signed nanoseconds, with INT64_MIN reserved for NULL. */
   timespan(value) {
     const ns = timespanBits(value);
-    return new RayTimespan(this, this._initTimespanParts(Number(ns & 0xffffffffn), Number(BigInt.asIntN(32, ns >> 32n))));
+    const ptr = this._initTimespanParts(Number(ns & 0xffffffffn), Number(BigInt.asIntN(32, ns >> 32n)));
+    if (!ptr) throw new Error('Failed to allocate TIMESPAN atom');
+    return new RayTimespan(this, ptr);
   }
 
   /**

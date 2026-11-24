@@ -391,7 +391,14 @@ EMSCRIPTEN_KEEPALIVE ray_t* init_timespan_parts(uint32_t lo, int32_t hi) {
   uint64_t bits = ((uint64_t)(uint32_t)hi << 32) | lo;
   int64_t ns;
   memcpy(&ns, &bits, sizeof(ns));
-  return ray_timespan(ns);
+  /* The released core's atom constructor dereferences a NULL allocation.
+   * Keep allocation failure at this new bridge boundary, not in JS payload. */
+  ray_t* out = ray_alloc(0);
+  if (!out) return NULL;
+  if (RAY_IS_ERR(out)) { ray_error_free(out); return NULL; }
+  out->type = -RAY_TIMESPAN;
+  out->i64 = ns;
+  return out;
 }
 /* Fresh constructor vectors have no aliases or indexes yet. JS observed the
  * sentinel during its fill loop; publish the hint once, without a second scan. */

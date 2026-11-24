@@ -20,9 +20,9 @@ SRC_DIR = $(EXEC_DIR)/src
 OBJ_DIR = $(BUILD_DIR)/obj
 RAYFORCE_PATCH = $(EXEC_DIR)/patches/rayforce-v3.0.2-wasm.patch
 
-# Rayforce source location: use RAYFORCE_SRC_DIR env var or default to ../rayforce
+# Use the pinned nested checkout by default; external source requires an explicit override.
 # Core layout: public umbrella header in include/, sources nested under src/{core,io,lang,mem,ops,store,table,vec}.
-RAYFORCE_SRC_DIR ?= ../rayforce
+RAYFORCE_SRC_DIR ?= $(SRC_DIR)/rayforce-repo
 RAYFORCE_SRC     = $(RAYFORCE_SRC_DIR)/src
 RAYFORCE_INC     = $(RAYFORCE_SRC_DIR)/include
 
@@ -41,9 +41,11 @@ RAYFORCE_VERSION ?= $(shell git -C $(RAYFORCE_SRC_DIR) describe --tags --match '
 ifeq ($(strip $(RAYFORCE_VERSION)),)
   RAYFORCE_VERSION := $(patsubst v%,%,$(RAYFORCE_REF))
 endif
-VERSION_MAJOR := $(word 1,$(subst ., ,$(RAYFORCE_VERSION)))
-VERSION_MINOR := $(word 2,$(subst ., ,$(RAYFORCE_VERSION)))
-VERSION_PATCH := $(word 3,$(subst ., ,$(RAYFORCE_VERSION)))
+# Keep numeric C macros valid when an explicitly selected preview has a suffix.
+VERSION_NUMERIC := $(firstword $(subst -, ,$(RAYFORCE_VERSION)))
+VERSION_MAJOR := $(word 1,$(subst ., ,$(VERSION_NUMERIC)))
+VERSION_MINOR := $(word 2,$(subst ., ,$(VERSION_NUMERIC)))
+VERSION_PATCH := $(word 3,$(subst ., ,$(VERSION_NUMERIC)))
 RAYFORCE_GIT_COMMIT := $(shell git -C $(RAYFORCE_SRC_DIR) rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +%Y-%m-%d)
 
@@ -297,10 +299,14 @@ default: wasm
 # Pull rayforce sources from GitHub
 # Clone rayforce repo (for CI or fresh setup)
 pull:
-	@echo "⬇️  Cloning rayforce $(RAYFORCE_REF) from GitHub..."
+	@echo "⬇️  Fetching rayforce $(RAYFORCE_REF), exact commit $(RAYFORCE_COMMIT)..."
+	@test ! -f $(SRC_DIR)/rayforce-repo/.git || (echo "❌ refusing to replace a linked core worktree"; exit 1)
 	@rm -rf $(SRC_DIR)/rayforce-repo
-	@git clone --depth 1 --branch $(RAYFORCE_REF) $(RAYFORCE_GITHUB) $(SRC_DIR)/rayforce-repo
-	@test "$$(git -C $(SRC_DIR)/rayforce-repo rev-parse HEAD)" = "$(RAYFORCE_COMMIT)" || (echo "❌ core tag does not match RAYFORCE_COMMIT"; exit 1)
+	@git init -q $(SRC_DIR)/rayforce-repo
+	@git -C $(SRC_DIR)/rayforce-repo remote add origin $(RAYFORCE_GITHUB)
+	@git -C $(SRC_DIR)/rayforce-repo fetch --depth 1 origin $(RAYFORCE_COMMIT)
+	@git -C $(SRC_DIR)/rayforce-repo checkout -q --detach FETCH_HEAD
+	@test "$$(git -C $(SRC_DIR)/rayforce-repo rev-parse HEAD)" = "$(RAYFORCE_COMMIT)" || (echo "❌ core checkout does not match RAYFORCE_COMMIT"; exit 1)
 	@git -C $(SRC_DIR)/rayforce-repo apply $(RAYFORCE_PATCH)
 	@echo "✅ Rayforce cloned to $(SRC_DIR)/rayforce-repo"
 	@echo "   Build with: RAYFORCE_SRC_DIR=$(SRC_DIR)/rayforce-repo make wasm"

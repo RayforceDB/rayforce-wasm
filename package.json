@@ -29,7 +29,9 @@
     "test:examples": "node test-examples.mjs",
     "prepublishOnly": "npm run build && npm test && npm run test:examples",
     "serve": "python3 -m http.server 8080",
-    "test:types": "tsc --noEmit --strict --target ES2020 --module NodeNext --moduleResolution NodeNext test/typed-timespan.ts"
+    "test:types": "tsc --noEmit --strict --target ES2020 --module NodeNext --moduleResolution NodeNext test/typed-timespan.ts",
+    "test:wire4": "node test-wire4.mjs && node test-contract.mjs && node test-timespan-allocation-unit.mjs && npm run test:types",
+    "test:wire4:examples": "node test-wire4-examples.mjs"
   },
   "keywords": [
     "rayforce",

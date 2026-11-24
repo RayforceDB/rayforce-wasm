@@ -12,6 +12,37 @@ not made compatible by changing their version byte. A wire-v4 package requires
 building and testing against the matching newer core. This update does not
 claim compatibility with arbitrary later core releases.
 
+### Optional immutable dev preview (not an npm release)
+
+A separate, tested preview uses core
+`fa9bccfd7f96b9248a39b23994f39a15d001b42c`. That writer emits wire 4 and its
+reader accepts wire 3 and 4, including the version-specific error layouts.
+It is **not** the released v3.0.2 configuration above and is not a promise of
+compatibility with other dev commits. From a fresh checkout with Emscripten
+6.0.6 activated:
+
+```sh
+make app RAYFORCE_REF=dev-fa9-preview \
+  RAYFORCE_COMMIT=fa9bccfd7f96b9248a39b23994f39a15d001b42c \
+  RAYFORCE_VERSION=0.0.0
+npm run test:wire4
+npm run test:wire4:examples
+```
+
+`0.0.0` explicitly labels this experimental core, not a released 3.0.2 binary.
+`pull` fetches and verifies the exact commit, not a moving branch. It replaces
+the nested core checkout; it refuses to replace a linked Git worktree.
+Use separate wrapper checkouts/build outputs for stable and dev builds.
+The checked-in native fixtures identify their generating core and include
+source generators. Five wasm32 compiler warnings remain in this dev pin;
+these checks are not a core full-suite, sanitizer or fault-injection campaign.
+This preview does not publish a package or choose the eventual release pin.
+
+A separate inherited SDK issue remains: `Dict.toJS()` decodes SYM keys a second
+time and can collapse them to the empty key. Direct named `Dict.get()` read
+the native fixture correctly, but that does not fix object conversion. The
+dict-conversion repair is part of PR #5, not incorporated into this preview.
+
 Durations are signed **nanoseconds**, not JS dates. `rf.timespan(1n)` creates one
 nanosecond; `.value` is exact `bigint`. `.toJS()` returns `bigint` or `null`.
 `rf.vector(Types.TIMESPAN, [1n, -1n, null])` exposes an exact `BigInt64Array`;

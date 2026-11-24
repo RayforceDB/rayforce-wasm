@@ -8,7 +8,7 @@ import type {
 
 export * from './rayforce.sdk.js';
 
-export declare const version: '0.2.1';
+export declare const version: '0.3.0';
 
 export interface InitOptions {
   /** URL/path to the Emscripten module loader. Defaults to ./rayforce.js. */
@@ -37,6 +37,7 @@ export declare const create: {
   readonly date: (value: number | Date) => ReturnType<RayforceSDK['date']>;
   readonly time: (value: number | Date) => ReturnType<RayforceSDK['time']>;
   readonly timestamp: (value: number | bigint | Date) => ReturnType<RayforceSDK['timestamp']>;
+  readonly timespan: (value: number | bigint | null) => import('./rayforce.sdk.js').RayTimespan;
 };
 
 declare const rayforce: {

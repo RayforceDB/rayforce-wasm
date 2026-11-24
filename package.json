@@ -1,6 +1,6 @@
 {
   "name": "rayforce-wasm",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "RayforceDB WASM SDK - High-performance columnar database in WebAssembly",
   "type": "module",
   "main": "dist/index.js",
@@ -25,10 +25,11 @@
   "scripts": {
     "build": "make app",
     "build:dev": "make dev",
-    "test": "node test.mjs && node test-contract.mjs",
+    "test": "node test.mjs && node test-contract.mjs && node test-current-core.mjs && npm run test:types",
     "test:examples": "node test-examples.mjs",
     "prepublishOnly": "npm run build && npm test && npm run test:examples",
-    "serve": "python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080",
+    "test:types": "tsc --noEmit --strict --target ES2020 --module NodeNext --moduleResolution NodeNext test/typed-timespan.ts"
   },
   "keywords": [
     "rayforce",
@@ -52,6 +53,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "playwright": "^1.57.0"
+    "playwright": "^1.57.0",
+    "typescript": "5.9.3"
   }
 }

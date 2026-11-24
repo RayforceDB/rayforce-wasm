@@ -1,0 +1,87 @@
+diff --git a/include/rayforce.h b/include/rayforce.h
+--- a/include/rayforce.h
++++ b/include/rayforce.h
+@@ -180,7 +180,11 @@
+              * bytes.  _idx_pad (8-15) is NULL for numeric columns, but
+              * holds str_pool for RAY_STR and sym_domain for RAY_SYM
+              * (attach_finalize preserves it there).  See ops/idxop.h. */
+-            struct { union ray_t* index;         union ray_t* _idx_pad; };
++            struct { union ray_t* index;
++#if UINTPTR_MAX == UINT32_MAX
++                uint8_t _index_ptr_pad[4]; /* keep the second aux slot at byte 8 */
++#endif
++                union ray_t* _idx_pad; };
+             /* RAY_ATTR_HAS_LINK (vectors, RAY_I32/RAY_I64 only): bytes
+              * 8-15 hold an int64 sym ID naming the target table.
+              * link_lo[8] aliases bytes 0-7.  See ops/linkop.h. */
+diff --git a/src/ops/idxop.h b/src/ops/idxop.h
+--- a/src/ops/idxop.h
++++ b/src/ops/idxop.h
+@@ -145,6 +145,9 @@
+             int64_t  n_keys;    /* number of non-null rows indexed */
+             int64_t  n_groups;  /* number of distinct keys */
+             int64_t  order_sym; /* optional column symbol ordered within each group */
++#if UINTPTR_MAX == UINT32_MAX
++            uint8_t _wasm32_pad[16]; /* four pointer high halves absent on wasm32 */
++#endif
+         } hash;
+         struct {                /* RAY_IDX_SORT */
+             ray_t* perm;        /* RAY_I64 vec, perm[i] = row id at sorted pos i */
+@@ -246,6 +249,7 @@
+  * contiguous 32-byte-aligned ray_t blocks mmap'd in place (no serialization).
+  * For the trailing child blocks to stay 32-aligned, the index payload must be a
+  * 32-byte multiple — enforce it so the layout invariant can't silently break. */
++_Static_assert(sizeof(((ray_index_t*)0)->u.hash) == 64, "index hash payload must reserve 64 bytes");
+ _Static_assert(sizeof(ray_index_t) % 32 == 0,
+                "ray_index_t must be a 32-byte multiple for in-place mmap layout");
+
+diff --git a/src/ops/idxop.c b/src/ops/idxop.c
+--- a/src/ops/idxop.c
++++ b/src/ops/idxop.c
+@@ -1528,16 +1528,28 @@
+  * simply ignored (column loads unindexed) rather than mis-decoded.
+  * Generation 1 = the CSR grouped hash layout (table/gkeys/offs/rows);
+  * generation-0 regions carried the retired chain layout. */
++#if defined(RAY_OS_WASM)
++#define RAY_IDX_FORMAT_MAJOR ((uint8_t)129)
++#else
+ #define RAY_IDX_FORMAT_MAJOR ((uint8_t)1)
++#endif
+ /* Generation 2: the same layout with the hash `table`, `offs` and `rows`
+  * stored narrow (see hx_get).  Written only for indexes that carry a narrow
+  * array, so a binary that knows generation 1 alone loads such a column
+  * unindexed instead of misreading it; generation-1 regions read as before. */
++#if defined(RAY_OS_WASM)
++#define RAY_IDX_FORMAT_NARROW ((uint8_t)130)
++#else
+ #define RAY_IDX_FORMAT_NARROW ((uint8_t)2)
++#endif
+ /* Generation 3: a hash table whose home slots are the top hash bits
+  * (RAY_MARK_HASH_HIGH, groups in hash order); arrays narrow or I64 as in
+  * generation 2.  Older binaries load such a column unindexed. */
++#if defined(RAY_OS_WASM)
++#define RAY_IDX_FORMAT_HASH_HIGH ((uint8_t)131)
++#else
+ #define RAY_IDX_FORMAT_HASH_HIGH ((uint8_t)3)
++#endif
+
+ /* Hash index arrays whose values are group ids, positions or row ids
+  * (`table`, `offs`, `rows`) fit 32 bits on any column below 2^32 rows; they
+diff --git a/src/io/csv.c b/src/io/csv.c
+--- a/src/io/csv.c
++++ b/src/io/csv.c
+@@ -3868,12 +3868,14 @@
+         wrote_any = true;
+         /* The chunk's bytes are done with: drop them from the mapping so a
+          * long file does not pin its whole length in resident memory. */
++#if !defined(RAY_OS_WASM)
+         if (next_offset > chunk_offset) {
+             size_t ps = (size_t)sysconf(_SC_PAGESIZE);
+             size_t a = (chunk_offset + ps - 1) & ~(ps - 1);
+             size_t b = next_offset & ~(ps - 1);
+             if (b > a) madvise((void*)(buf + a), b - a, MADV_DONTNEED);
+         }
++#endif
+         if (cnt == 0) break;
+         chunk_offset = next_offset;
+     }

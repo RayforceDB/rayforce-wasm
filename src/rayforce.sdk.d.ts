@@ -22,6 +22,7 @@ export declare const Types: {
   readonly GUID: 11;
   readonly SYM: 12;
   readonly STR: 13;
+  readonly TIMESPAN: 16;
   readonly TABLE: 98;
   readonly DICT: 99;
   readonly LAMBDA: 100;
@@ -143,6 +144,13 @@ export declare class RayTimestamp extends RayObject {
   toJS(): Date;
 }
 
+export declare class RayTimespan extends RayObject {
+  /** Exact signed nanoseconds; INT64_MIN is the raw NULL sentinel. */
+  readonly value: bigint;
+  readonly isNull: boolean;
+  toJS(): bigint | null;
+}
+
 export declare class Sym extends RayObject {
   /** Interned symbol ID */
   readonly id: number;
@@ -188,15 +196,15 @@ export declare class Vector<T extends TypedArray = TypedArray> extends RayObject
   readonly typedArray: T;
   
   /** Get element at index */
-  at(idx: number): T extends BigInt64Array ? bigint : number;
+  at(idx: number, raw?: boolean): T extends BigInt64Array ? number | bigint | null : number;
   
   /** Set element at index */
-  set(idx: number, value: T extends BigInt64Array ? bigint : number): void;
+  set(idx: number, value: T extends BigInt64Array ? number | bigint | null : number): void;
   
   /** Convert to JS array (copies data) */
-  toJS(): Array<T extends BigInt64Array ? number | bigint : number>;
+  toJS(): Array<T extends BigInt64Array ? number | bigint | null : number>;
   
-  [Symbol.iterator](): Iterator<T extends BigInt64Array ? bigint : number>;
+  [Symbol.iterator](): Iterator<T extends BigInt64Array ? number | bigint | null : number>;
 }
 
 /**
@@ -436,6 +444,7 @@ export declare class RayforceSDK {
   
   /** Create a timestamp */
   timestamp(value: number | bigint | Date): RayTimestamp;
+  timespan(value: number | bigint | null): RayTimespan;
   
   /** Create a symbol (interned string) */
   symbol(value: string): Sym;
@@ -448,6 +457,7 @@ export declare class RayforceSDK {
    * @param type - Type code from Types
    * @param lengthOrData - Length or array of values
    */
+  vector(type: 16, lengthOrData: number | Array<number | bigint | null>): Vector<BigInt64Array>;
   vector<T extends TypeCode>(type: T, lengthOrData: number | any[]): Vector;
   
   /**

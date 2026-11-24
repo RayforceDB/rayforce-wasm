@@ -34,7 +34,7 @@ await new Promise((resolve, reject) => {
 
 const { port } = server.address();
 const origin = `http://127.0.0.1:${port}`;
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL ?? 'chrome', headless: true });
 
 async function openPage(pathname, { cdnPackage = false } = {}) {
   const page = await browser.newPage();
@@ -48,7 +48,7 @@ async function openPage(pathname, { cdnPackage = false } = {}) {
   );
 
   if (cdnPackage) {
-    await page.route('https://unpkg.com/rayforce-wasm@0.2.1/dist/**', async (route) => {
+    await page.route('https://unpkg.com/rayforce-wasm@0.3.0/dist/**', async (route) => {
       const filename = new URL(route.request().url()).pathname.split('/').at(-1);
       const filePath = join(root, 'dist', filename);
       await route.fulfill({
@@ -65,6 +65,18 @@ async function openPage(pathname, { cdnPackage = false } = {}) {
 try {
   const main = await openPage('/examples/index.html');
   await main.page.waitForFunction(() => globalThis.rf?.version);
+
+  const nativeFrames = JSON.parse(await readFile(join(root, 'test/fixtures/core-v3.0.2-wire.json'), 'utf8'));
+  assert.deepEqual(await main.page.evaluate((frames) => {
+    const rf = globalThis.rf;
+    const duration = rf.timespan(9007199254740993n);
+    const v = rf.vector(16, [1n, -1n, null, 9007199254740993n]);
+    const bytes = frames.cases[2].hex.match(/../g).map(x => parseInt(x, 16));
+    const wire = rf.eval(`(de (as 'U8 [${bytes.join(' ')}]))`);
+    const observed = [duration.value.toString(), v.toJS().map(x => x === null ? null : x.toString()), wire.toJS().toString()];
+    duration.drop(); v.drop(); wire.drop();
+    return observed;
+  }, nativeFrames), ['9007199254740993', ['1', '-1', null, '9007199254740993'], '9007199254740993']);
 
   const exampleButtons = main.page.locator('.example-btn');
   for (let index = 0; index < (await exampleButtons.count()); index += 1) {
